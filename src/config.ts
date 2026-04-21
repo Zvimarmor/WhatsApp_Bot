@@ -6,5 +6,6 @@ export const config = {
     ownerPhoneNumber: (process.env.OWNER_PHONE_NUMBER || '').replace(/\D/g, ''),
     geminiApiKey: process.env.GEMINI_API_KEY || '',
     calendarId: (process.env.CALENDAR_ID || 'primary').trim(),
+    expenseSheetId: (process.env.EXPENSE_SHEET_ID || '').trim(),
     port: parseInt(process.env.PORT || '3000', 10),
 };

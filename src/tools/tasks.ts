@@ -1,9 +1,11 @@
-import { google, tasks_v1 } from 'googleapis';
+import { google } from 'googleapis';
 import fs from 'fs';
 import path from 'path';
 
 const SCOPES = ['https://www.googleapis.com/auth/tasks'];
 const KEY_PATH = path.join(process.cwd(), 'service_account.json');
+
+let cachedTasklistId: string | null = null;
 
 async function getTasksClient() {
     if (!fs.existsSync(KEY_PATH)) {
@@ -14,6 +16,24 @@ async function getTasksClient() {
         scopes: SCOPES,
     });
     return google.tasks({ version: 'v1', auth });
+}
+
+async function getTasklistId(): Promise<string> {
+    if (cachedTasklistId) return cachedTasklistId;
+
+    const client = await getTasksClient();
+    try {
+        const res = await client.tasklists.list({ maxResults: 1 });
+        const lists = res.data.items || [];
+        if (lists.length > 0 && lists[0].id) {
+            cachedTasklistId = lists[0].id;
+            console.log(`[Tasks] Resolved tasklist: "${lists[0].title}" (${cachedTasklistId})`);
+            return cachedTasklistId;
+        }
+    } catch (err: any) {
+        console.error('[Tasks] Failed to resolve tasklist, falling back to @default:', err.message);
+    }
+    return '@default';
 }
 
 export const taskTools = {
@@ -28,8 +48,9 @@ export const taskTools = {
         },
         execute: async (args: any) => {
             const tasksClient = await getTasksClient();
+            const tasklistId = await getTasklistId();
             const res = await tasksClient.tasks.list({
-                tasklist: '@default',
+                tasklist: tasklistId,
                 showCompleted: false,
                 maxResults: args.maxResults || 20,
             });
@@ -38,7 +59,7 @@ export const taskTools = {
     },
     complete_task: {
         name: "complete_task",
-        description: "Mark a Google Task as completed.",
+        description: "Mark a Google Task as completed by its ID.",
         parameters: {
             type: "object",
             properties: {
@@ -48,24 +69,28 @@ export const taskTools = {
         },
         execute: async (args: any) => {
             const tasksClient = await getTasksClient();
+            const tasklistId = await getTasklistId();
 
-            // First get the task
-            const getRes = await tasksClient.tasks.get({
-                tasklist: '@default',
-                task: args.taskId
-            });
+            try {
+                const getRes = await tasksClient.tasks.get({
+                    tasklist: tasklistId,
+                    task: args.taskId
+                });
 
-            const task = getRes.data;
-            task.status = 'completed';
+                const task = getRes.data;
+                task.status = 'completed';
 
-            // Update it
-            const updateRes = await tasksClient.tasks.update({
-                tasklist: '@default',
-                task: args.taskId,
-                requestBody: task
-            });
+                const updateRes = await tasksClient.tasks.update({
+                    tasklist: tasklistId,
+                    task: args.taskId,
+                    requestBody: task
+                });
 
-            return { result: "success", task: updateRes.data };
+                return { result: "success", task: updateRes.data };
+            } catch (err: any) {
+                console.error(`[Tasks] Failed to complete task ${args.taskId}:`, err.message);
+                return { error: `Failed to complete task: ${err.message}` };
+            }
         }
     },
     add_task: {
@@ -81,8 +106,9 @@ export const taskTools = {
         },
         execute: async (args: any) => {
             const tasksClient = await getTasksClient();
+            const tasklistId = await getTasklistId();
             const res = await tasksClient.tasks.insert({
-                tasklist: '@default',
+                tasklist: tasklistId,
                 requestBody: {
                     title: args.title,
                     notes: args.notes

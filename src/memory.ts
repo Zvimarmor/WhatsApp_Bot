@@ -2,7 +2,6 @@ import Database from 'better-sqlite3';
 
 const db = new Database('messages.db');
 
-// Enable WAL mode for concurrent read/write safety
 db.pragma('journal_mode = WAL');
 
 db.exec(`
@@ -19,7 +18,18 @@ db.exec(`
         frequency TEXT NOT NULL,
         last_logged_date TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        amount REAL NOT NULL,
+        category TEXT NOT NULL,
+        description TEXT NOT NULL,
+        date TEXT NOT NULL,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
 `);
+
+// === Messages ===
 
 export function addMessage(role: 'user' | 'model', content: string) {
     try {
@@ -41,7 +51,7 @@ export function getRecentHistory(limit: number = 20) {
     }
 }
 
-// === Habit Tracking ===
+// === Habits ===
 
 export function addHabit(name: string, frequency: string) {
     try {
@@ -74,5 +84,54 @@ export function getHabits() {
     } catch (err: any) {
         console.error('[DB] Failed to list habits:', err.message);
         return [];
+    }
+}
+
+// === Expenses ===
+
+export function addExpenseToDb(amount: number, category: string, description: string, date: string) {
+    try {
+        const stmt = db.prepare('INSERT INTO expenses (amount, category, description, date) VALUES (?, ?, ?, ?)');
+        stmt.run(amount, category, description, date);
+    } catch (err: any) {
+        console.error('[DB] Failed to add expense:', err.message);
+        throw err;
+    }
+}
+
+export function getExpenseSummaryFromDb(period: string = 'week') {
+    try {
+        const now = new Date();
+        let since: string;
+
+        if (period === 'month') {
+            const d = new Date(now.getFullYear(), now.getMonth(), 1);
+            since = d.toISOString().split('T')[0];
+        } else {
+            const d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            since = d.toISOString().split('T')[0];
+        }
+
+        const stmt = db.prepare(`
+            SELECT category, SUM(amount) as total, COUNT(*) as count
+            FROM expenses
+            WHERE date >= ?
+            GROUP BY category
+            ORDER BY total DESC
+        `);
+        const rows = stmt.all(since) as { category: string, total: number, count: number }[];
+
+        const grandTotal = rows.reduce((sum, r) => sum + r.total, 0);
+
+        return {
+            period,
+            since,
+            categories: rows,
+            total: grandTotal,
+            summary_hebrew: `סה"כ הוצאות (${period === 'month' ? 'חודשי' : 'שבועי'}): ${grandTotal} ₪`
+        };
+    } catch (err: any) {
+        console.error('[DB] Failed to get expense summary:', err.message);
+        return { error: err.message };
     }
 }

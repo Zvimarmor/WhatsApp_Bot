@@ -12,6 +12,7 @@ import { taskTools } from "./tasks";
 import { habitTools } from "./habits";
 import { dailyStatusTools } from "./daily_status";
 import { searchTools } from "./search";
+import { expenseTools } from "./expenses";
 
 export const toolRegistry: Record<string, Tool> = {
     get_current_time: {
@@ -30,7 +31,8 @@ export const toolRegistry: Record<string, Tool> = {
     ...taskTools,
     ...habitTools,
     ...dailyStatusTools,
-    ...searchTools
+    ...searchTools,
+    ...expenseTools
 };
 
 export const getGeminiTools = (): FunctionDeclaration[] => {
