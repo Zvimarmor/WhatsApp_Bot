@@ -5,21 +5,17 @@ import { config } from '../config';
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 const KEY_PATH = path.join(process.cwd(), 'service_account.json');
+const TIMEZONE = 'Asia/Jerusalem';
 
 async function getCalendarClient() {
     if (!fs.existsSync(KEY_PATH)) {
-        throw new Error("Missing 'service_account.json'. Please follow the instructions to provide your Google API keys.");
+        throw new Error("Missing 'service_account.json'.");
     }
-
-    try {
-        const auth = new google.auth.GoogleAuth({
-            keyFile: KEY_PATH,
-            scopes: SCOPES,
-        });
-        return google.calendar({ version: 'v3', auth });
-    } catch (err) {
-        throw new Error("Invalid 'service_account.json'. Make sure you pasted the entire JSON content from Google Cloud.");
-    }
+    const auth = new google.auth.GoogleAuth({
+        keyFile: KEY_PATH,
+        scopes: SCOPES,
+    });
+    return google.calendar({ version: 'v3', auth });
 }
 
 export const calendarTools = {
@@ -37,6 +33,7 @@ export const calendarTools = {
             const res = await calendar.events.list({
                 calendarId: config.calendarId,
                 timeMin: new Date().toISOString(),
+                timeZone: TIMEZONE,
                 maxResults: args.maxResults || 10,
                 singleEvents: true,
                 orderBy: 'startTime',
@@ -46,15 +43,15 @@ export const calendarTools = {
     },
     add_calendar_event: {
         name: "add_calendar_event",
-        description: "Add a new event to the user's Google Calendar.",
+        description: "Add a new event to the user's Google Calendar. Times should be in ISO format.",
         parameters: {
             type: "object",
             properties: {
                 summary: { type: "string", description: "Title of the event" },
                 location: { type: "string", description: "Location or meeting link" },
                 description: { type: "string", description: "Notes for the event" },
-                startDateTime: { type: "string", description: "ISO format start time (e.g. 2024-04-17T14:00:00Z)" },
-                endDateTime: { type: "string", description: "ISO format end time" }
+                startDateTime: { type: "string", description: "ISO start time, e.g. 2026-04-21T14:00:00" },
+                endDateTime: { type: "string", description: "ISO end time, e.g. 2026-04-21T15:00:00" }
             },
             required: ["summary", "startDateTime", "endDateTime"]
         },
@@ -66,8 +63,8 @@ export const calendarTools = {
                     summary: args.summary,
                     location: args.location,
                     description: args.description,
-                    start: { dateTime: args.startDateTime },
-                    end: { dateTime: args.endDateTime },
+                    start: { dateTime: args.startDateTime, timeZone: TIMEZONE },
+                    end: { dateTime: args.endDateTime, timeZone: TIMEZONE },
                 },
             });
             return { status: "success", event: res.data };
