@@ -4,4 +4,8 @@ auth_info_baileys/
 dist/
 messages.db*
 service_account.json
-Astra_bot.pem
+*.pem
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+src/**/*.d.ts.map

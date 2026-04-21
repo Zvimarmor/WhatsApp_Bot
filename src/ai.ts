@@ -7,13 +7,23 @@ const genAI = new GoogleGenerativeAI(config.geminiApiKey);
 
 const model = genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
-    systemInstruction: `You are Astra, an autonomous AI personal assistant. 
-You primarily speak Hebrew, but can respond in English if spoken to in English.
-Your goal is to be proactive, concise, and helpful.
-You act as a personal secretary, financial manager, and research partner.
-You have FULL access to the user's Google Calendar via built-in tools. Use them to manage meetings, zoom calls, and schedules proactively.
-If a user asks a general knowledge question, answer it directly and conversationally.
-Always respond in a natural, conversational way via WhatsApp.`,
+    systemInstruction: `אתה אסטרה, עוזרת אישית אוטונומית שחיה בוואטסאפ.
+אתה מדבר בעברית תמיד, אלא אם פונים אליך באנגלית.
+אתה משמש כמזכירה אישית, מנהל משימות, מעקב הרגלים, וחוקר.
+
+הכלים שלך:
+- 📅 יומן: צפייה והוספת אירועים ביומן Google.
+- ✅ משימות: ניהול Google Tasks (הוספה, סיום, רשימה).
+- 🧘 הרגלים: מעקב הרגלים יומי (הוספה, רישום, רשימה).
+- 📊 סטטוס יומי: סיכום כל המשימות וההרגלים שנותרו להיום.
+- 🔍 חיפוש: חיפוש מידע באינטרנט בזמן אמת (מזג אוויר, חדשות, שאלות כלליות).
+- 🕐 שעון: הצגת התאריך והשעה הנוכחיים בישראל.
+
+כללים:
+1. תמיד ענה בעברית, בטון טבעי ותמציתי כמו בוואטסאפ.
+2. אם המשתמש שואל שאלה כללית, ענה ישירות ללא כלים.
+3. השתמש בכלים רק כשצריך מידע חיצוני או פעולה.
+4. כשאתה מציג רשימה, השתמש באימוג'ים ומספור.`,
     tools: [
         { functionDeclarations: getGeminiTools() },
     ],
@@ -24,7 +34,6 @@ export async function analyzeIntent(text: string): Promise<string> {
         throw new Error("Gemini API key is not configured.");
     }
 
-    // 1. Fetch recent memory and ensure it starts with 'user' and alternates roles
     const historyRows = getRecentHistory(20);
 
     let history: { role: string, parts: { text: string }[] }[] = [];
@@ -43,7 +52,6 @@ export async function analyzeIntent(text: string): Promise<string> {
 
     const chat = model.startChat({ history });
 
-    // Store user message in DB
     addMessage('user', text);
 
     console.log("Analyzing intent and generating response...");
@@ -55,10 +63,8 @@ export async function analyzeIntent(text: string): Promise<string> {
         try {
             let result = await chat.sendMessage(text);
 
-            // 3. Handle tool calls if any
             let call = result.response.functionCalls()?.[0];
 
-            // Loop to handle potential sequential tool calls
             let loopCount = 0;
             while (call && loopCount < 5) {
                 console.log(`AI invoking tool: ${call.name} with args:`, call.args);
@@ -69,7 +75,7 @@ export async function analyzeIntent(text: string): Promise<string> {
                     try {
                         toolResponseData = await tool.execute(call.args);
                     } catch (err: any) {
-                        console.error(`Tool execution error for ${call.name}:`, err);
+                        console.error(`Tool execution error for ${call.name}:`, err.message);
                         toolResponseData = { error: err.message };
                     }
                 } else {
@@ -77,7 +83,6 @@ export async function analyzeIntent(text: string): Promise<string> {
                     toolResponseData = { error: "Tool not found locally." };
                 }
 
-                // Pass the execution result back to Gemini so it can answer the user
                 result = await chat.sendMessage([{
                     functionResponse: {
                         name: call.name,
@@ -91,7 +96,6 @@ export async function analyzeIntent(text: string): Promise<string> {
 
             const finalResponseText = result.response.text();
 
-            // Store model response in DB
             addMessage('model', finalResponseText);
 
             return finalResponseText;
@@ -105,7 +109,7 @@ export async function analyzeIntent(text: string): Promise<string> {
                 continue;
             }
 
-            console.error("Gemini API Error:", error);
+            console.error("Gemini API Error:", error.message);
             throw error;
         }
     }
