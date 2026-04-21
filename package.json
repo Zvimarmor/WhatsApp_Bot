@@ -19,6 +19,7 @@
   },
   "homepage": "https://github.com/Zvimarmor/WhatsApp_Bot#readme",
   "dependencies": {
+    "@google-cloud/text-to-speech": "^6.4.0",
     "@google/generative-ai": "^0.24.1",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^12.9.0",

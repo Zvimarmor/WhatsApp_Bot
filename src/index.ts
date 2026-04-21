@@ -109,6 +109,24 @@ async function connectToWhatsApp() {
             console.log('Processing text message...');
             const responseText = await analyzeIntent(text);
             lastResponseText = responseText;
+
+            // Check if user wants a voice reply
+            const wantsVoice = /תקריאי|תגידי|voice|קולי/i.test(text);
+            if (wantsVoice) {
+                try {
+                    const { textToSpeech } = await import('./tools/voice');
+                    const audioBuffer = await textToSpeech(responseText);
+                    await sock.sendMessage(remoteJid!, {
+                        audio: audioBuffer,
+                        mimetype: 'audio/ogg; codecs=opus',
+                        ptt: true  // Send as voice note (push-to-talk)
+                    });
+                    return;
+                } catch (ttsErr: any) {
+                    console.error('[TTS] Failed, falling back to text:', ttsErr.message);
+                }
+            }
+
             await sock.sendMessage(remoteJid!, { text: responseText });
 
         } catch (err: any) {

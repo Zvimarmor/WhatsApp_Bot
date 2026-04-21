@@ -32,9 +32,11 @@ const model = genAI.getGenerativeModel({
     ],
 });
 
-// Exponential backoff helper
+// Exponential backoff with jitter
 function getRetryDelay(attempt: number): number {
-    return Math.min(1000 * Math.pow(2, attempt), 16000); // 1s, 2s, 4s, 8s, 16s max
+    const base = Math.min(1000 * Math.pow(2, attempt), 16000);
+    const jitter = Math.random() * 1000; // 0–1000ms random jitter
+    return base + jitter;
 }
 
 function isRetryableError(error: any): boolean {
