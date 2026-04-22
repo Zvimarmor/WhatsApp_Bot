@@ -6,7 +6,7 @@ import { addMessage, getRecentHistory } from "./memory";
 const genAI = new GoogleGenerativeAI(config.geminiApiKey);
 
 const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
+    model: "gemini-1.5-pro",
     systemInstruction: `שמך אסטרה (Astra). את עוזרת אישית חכמה עם יכולות מולטי-מודאליות, שחיה בוואטסאפ.
 את נמצאת באזור הזמן Asia/Jerusalem (ישראל). כל התאריכים והשעות בהקשר ישראלי.
 את מדברת בעברית תמיד, אלא אם פונים אליך באנגלית.
@@ -131,7 +131,7 @@ export async function analyzeIntent(text: string): Promise<string> {
 
 // Multimodal: analyze audio buffer
 export async function analyzeAudio(audioBuffer: Buffer, mimeType: string = 'audio/ogg'): Promise<string> {
-    const audioModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const audioModel = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
     let attempts = 0;
     const maxAttempts = 3;
@@ -166,7 +166,7 @@ export async function analyzeAudio(audioBuffer: Buffer, mimeType: string = 'audi
 
 // Multimodal: analyze image (for receipt OCR)
 export async function analyzeImage(imageBuffer: Buffer, mimeType: string, userPrompt: string): Promise<string> {
-    const visionModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const visionModel = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
     let attempts = 0;
     const maxAttempts = 3;

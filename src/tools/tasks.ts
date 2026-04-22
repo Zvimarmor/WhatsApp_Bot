@@ -71,10 +71,18 @@ export const taskTools = {
             const tasksClient = await getTasksClient();
             const tasklistId = await getTasklistId();
 
+            let taskId: string = args.taskId;
+            // Safeguard against duplicated IDs (e.g. ID_ID or IDID)
+            const match = taskId.match(/^(.+)(?:_?\1)$/);
+            if (match) {
+                console.warn(`[Tasks] Fixing duplicated taskId: ${taskId} -> ${match[1]}`);
+                taskId = match[1];
+            }
+
             try {
                 const getRes = await tasksClient.tasks.get({
                     tasklist: tasklistId,
-                    task: args.taskId
+                    task: taskId
                 });
 
                 const task = getRes.data;
@@ -82,13 +90,13 @@ export const taskTools = {
 
                 const updateRes = await tasksClient.tasks.update({
                     tasklist: tasklistId,
-                    task: args.taskId,
+                    task: taskId,
                     requestBody: task
                 });
 
                 return { result: "success", task: updateRes.data };
             } catch (err: any) {
-                console.error(`[Tasks] Failed to complete task ${args.taskId}:`, err.message);
+                console.error(`[Tasks] Failed to complete task ${taskId}:`, err.message);
                 return { error: `Failed to complete task: ${err.message}` };
             }
         }

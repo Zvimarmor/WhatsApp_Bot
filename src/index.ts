@@ -158,8 +158,13 @@ function startProactiveScheduler(sock: any) {
 
 async function sendProactiveMessage(sock: any, type: 'morning' | 'evening') {
     if (!selfChatJid) {
-        console.warn('[Scheduler] No self-chat JID cached. Skipping.');
-        return;
+        if (config.ownerPhoneNumber) {
+            selfChatJid = `${config.ownerPhoneNumber}@s.whatsapp.net`;
+            console.log(`[Scheduler] Fallback to owner JID: ${selfChatJid}`);
+        } else {
+            console.warn('[Scheduler] No self-chat JID cached and no owner number in config. Skipping.');
+            return;
+        }
     }
 
     try {
