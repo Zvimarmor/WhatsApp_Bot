@@ -2,13 +2,11 @@ import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaile
 import pino from 'pino';
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
-import cron from 'node-cron';
 import { config } from './config';
 import { analyzeIntent, analyzeAudio, analyzeImage } from './ai';
-import { toolRegistry } from './tools/registry';
+import { startProactiveScheduler, setSelfChatJid } from './scheduler';
 
 let lastResponseText = '';
-let selfChatJid: string | null = null;
 
 async function connectToWhatsApp() {
     console.log('--- ASTRA SYSTEM BOOT v3.0 ---');
@@ -68,9 +66,8 @@ async function connectToWhatsApp() {
         if (!isAuthorized) return;
 
         // Cache self-chat JID
-        if (!selfChatJid && remoteJid) {
-            selfChatJid = remoteJid;
-            console.log(`[Scheduler] Locked self-chat JID: ${selfChatJid}`);
+        if (remoteJid) {
+            setSelfChatJid(remoteJid);
         }
 
         try {
@@ -93,7 +90,7 @@ async function connectToWhatsApp() {
                 const caption = msg.message.imageMessage.caption || '';
                 const prompt = caption
                     ? `המשתמש שלח תמונה עם הכיתוב: "${caption}". נתח את התמונה ועזור לו.`
-                    : 'המשתמש שלח תמונה. אם זו קבלה, חלץ את הסכום, הקטגוריה והתיאור. אם לא, תאר את התמונה.';
+                    : 'חלץ מהקבלה את הסכום הכולל, בית העסק והקטגוריה, והשתמש בכלי add_expense כדי לשמור אותם.';
                 const responseText = await analyzeImage(buffer, mimeType, prompt);
                 lastResponseText = responseText;
                 await sock.sendMessage(remoteJid!, { text: responseText });
@@ -134,115 +131,6 @@ async function connectToWhatsApp() {
             await sock.sendMessage(remoteJid!, { text: "מצטערת, קרתה תקלה קטנה. נסה שוב." });
         }
     });
-}
-
-// === Proactive Notification Scheduler ===
-
-function startProactiveScheduler(sock: any) {
-    console.log('[Scheduler] Starting cron jobs (Israel time)...');
-
-    // 08:00 AM → Morning Briefing
-    cron.schedule('0 8 * * *', async () => {
-        console.log('[Scheduler] Morning briefing...');
-        await sendProactiveMessage(sock, 'morning');
-    }, { timezone: 'Asia/Jerusalem' });
-
-    // 08:00 PM → Evening Summary
-    cron.schedule('0 20 * * *', async () => {
-        console.log('[Scheduler] Evening summary...');
-        await sendProactiveMessage(sock, 'evening');
-    }, { timezone: 'Asia/Jerusalem' });
-
-    console.log('[Scheduler] Registered: 08:00 (morning) & 20:00 (evening)');
-}
-
-async function sendProactiveMessage(sock: any, type: 'morning' | 'evening') {
-    if (!selfChatJid) {
-        if (config.ownerPhoneNumber) {
-            selfChatJid = `${config.ownerPhoneNumber}@s.whatsapp.net`;
-            console.log(`[Scheduler] Fallback to owner JID: ${selfChatJid}`);
-        } else {
-            console.warn('[Scheduler] No self-chat JID cached and no owner number in config. Skipping.');
-            return;
-        }
-    }
-
-    try {
-        const calendarRes = await toolRegistry.list_calendar_events.execute({ maxResults: 10 });
-        const tasksRes = await toolRegistry.list_pending_tasks.execute({ maxResults: 20 });
-        const habitsRes = await toolRegistry.list_habits.execute({});
-
-        const events = calendarRes.events || [];
-        const tasks = tasksRes.tasks || [];
-        const habits = habitsRes.habits || [];
-
-        const today = new Date().toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem', weekday: 'long', day: 'numeric', month: 'long' });
-
-        let message = '';
-
-        if (type === 'morning') {
-            message = `☀️ *בוקר טוב! סיכום יומי — ${today}*\n\n`;
-
-            if (events.length > 0) {
-                message += `📅 *אירועים היום:*\n`;
-                events.forEach((e: any, i: number) => {
-                    const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('he-IL', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' }) : 'כל היום';
-                    message += `  ${i + 1}. ${e.summary} (${time})\n`;
-                });
-            } else {
-                message += `📅 אין אירועים מתוכננים להיום.\n`;
-            }
-
-            message += `\n`;
-
-            if (tasks.length > 0) {
-                message += `✅ *משימות פתוחות (${tasks.length}):*\n`;
-                tasks.slice(0, 5).forEach((t: any, i: number) => {
-                    message += `  ${i + 1}. ${t.title}\n`;
-                });
-                if (tasks.length > 5) message += `  ...ועוד ${tasks.length - 5} משימות\n`;
-            } else {
-                message += `✅ אין משימות פתוחות. יום נקי!\n`;
-            }
-
-            message += `\nיום פרודוקטיבי! 💪`;
-
-        } else {
-            message = `🌙 *ערב טוב! סיכום ערב — ${today}*\n\n`;
-
-            const todayDate = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jerusalem' });
-            const unloggedHabits = habits.filter((h: any) => h.last_logged_date !== todayDate);
-
-            if (unloggedHabits.length > 0) {
-                message += `🧘 *הרגלים שטרם בוצעו:*\n`;
-                unloggedHabits.forEach((h: any, i: number) => {
-                    message += `  ${i + 1}. ${h.name} (${h.frequency})\n`;
-                });
-            } else if (habits.length > 0) {
-                message += `🧘 כל ההרגלים בוצעו היום! 🎉\n`;
-            }
-
-            // Expense summary for today
-            try {
-                const expenseRes = await toolRegistry.get_expense_summary.execute({ period: 'week' });
-                if (expenseRes.total > 0) {
-                    message += `\n💰 *הוצאות השבוע:* ${expenseRes.total} ₪\n`;
-                }
-            } catch { }
-
-            if (tasks.length > 0) {
-                message += `\n✅ *משימות שנשארו:* ${tasks.length}\n`;
-            }
-
-            message += `\nלילה טוב! 😴`;
-        }
-
-        lastResponseText = message;
-        await sock.sendMessage(selfChatJid, { text: message });
-        console.log(`[Scheduler] ${type} message sent.`);
-    } catch (err: any) {
-        console.error(`[Scheduler] Failed:`, err.message);
-    }
 }
 
 connectToWhatsApp().catch(err => {

@@ -6,6 +6,7 @@ import { config } from '../config';
 const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 const KEY_PATH = path.join(process.cwd(), 'service_account.json');
 const TIMEZONE = 'Asia/Jerusalem';
+const CALENDAR_ID = 'fe05fa4349118c13c0544ea34b399cb2d15ee25be0faf840ea9da1192e67ff43@group.calendar.google.com';
 
 async function getCalendarClient() {
     if (!fs.existsSync(KEY_PATH)) {
@@ -31,7 +32,7 @@ export const calendarTools = {
         execute: async (args: any) => {
             const calendar = await getCalendarClient();
             const res = await calendar.events.list({
-                calendarId: config.calendarId,
+                calendarId: CALENDAR_ID,
                 timeMin: new Date().toISOString(),
                 timeZone: TIMEZONE,
                 maxResults: args.maxResults || 10,
@@ -57,17 +58,23 @@ export const calendarTools = {
         },
         execute: async (args: any) => {
             const calendar = await getCalendarClient();
-            const res = await calendar.events.insert({
-                calendarId: config.calendarId,
-                requestBody: {
-                    summary: args.summary,
-                    location: args.location,
-                    description: args.description,
-                    start: { dateTime: args.startDateTime, timeZone: TIMEZONE },
-                    end: { dateTime: args.endDateTime, timeZone: TIMEZONE },
-                },
-            });
-            return { status: "success", event: res.data };
+            try {
+                const res = await calendar.events.insert({
+                    calendarId: CALENDAR_ID,
+                    requestBody: {
+                        summary: args.summary,
+                        location: args.location,
+                        description: args.description,
+                        start: { dateTime: args.startDateTime, timeZone: TIMEZONE },
+                        end: { dateTime: args.endDateTime, timeZone: TIMEZONE },
+                    },
+                });
+                console.log(`[Calendar] Successfully added event: "${args.summary}" at ${args.startDateTime}`);
+                return { status: "success", event: res.data };
+            } catch (err: any) {
+                console.error(`[Calendar] Failed to add event "${args.summary}":`, err.message);
+                return { status: "error", error: err.message };
+            }
         }
     }
 };
