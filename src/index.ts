@@ -59,11 +59,14 @@ async function connectToWhatsApp() {
         const botId = sock.user?.id.split(':')[0] || '';
         const remoteJid = msg.key.remoteJid;
 
-        const isAuthorized = remoteJid?.includes(botId) ||
-            remoteJid?.includes('1443226456216') ||
-            (config.ownerPhoneNumber && remoteJid?.includes(config.ownerPhoneNumber));
+        // === HARD BLOCK: Never respond in group chats ===
+        if (remoteJid?.endsWith('@g.us') || remoteJid?.endsWith('@broadcast')) return;
 
-        if (!isAuthorized) return;
+        // Only respond to self-chat or owner's direct messages
+        const isSelfChat = remoteJid?.includes(botId);
+        const isOwner = config.ownerPhoneNumber && remoteJid?.includes(config.ownerPhoneNumber);
+
+        if (!isSelfChat && !isOwner) return;
 
         // Cache self-chat JID
         if (remoteJid) {
