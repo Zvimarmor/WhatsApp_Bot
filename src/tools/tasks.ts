@@ -94,10 +94,10 @@ export const taskTools = {
                     requestBody: task
                 });
 
-                return { result: "success", task: updateRes.data };
+                return { status: "success", task: updateRes.data };
             } catch (err: any) {
                 console.error(`[Tasks] Failed to complete task ${taskId}:`, err.message);
-                return { error: `Failed to complete task: ${err.message}` };
+                return { status: "error", error: `Failed to complete task: ${err.message}` };
             }
         }
     },
@@ -115,14 +115,19 @@ export const taskTools = {
         execute: async (args: any) => {
             const tasksClient = await getTasksClient();
             const tasklistId = await getTasklistId();
-            const res = await tasksClient.tasks.insert({
-                tasklist: tasklistId,
-                requestBody: {
-                    title: args.title,
-                    notes: args.notes
-                }
-            });
-            return { result: "success", task: res.data };
+            try {
+                const res = await tasksClient.tasks.insert({
+                    tasklist: tasklistId,
+                    requestBody: {
+                        title: args.title,
+                        notes: args.notes
+                    }
+                });
+                return { status: "success", task: res.data };
+            } catch (err: any) {
+                console.error(`[Tasks] Failed to add task:`, err.message);
+                return { status: "error", error: `Failed to add task: ${err.message}` };
+            }
         }
     }
 };

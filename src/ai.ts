@@ -12,6 +12,11 @@ const model = genAI.getGenerativeModel({
 את נמצאת באזור הזמן Asia/Jerusalem (ישראל). כל התאריכים והשעות בהקשר ישראלי.
 את מדברת בעברית תמיד, אלא אם פונים אליך באנגלית.
 
+חוקים קריטיים לטיפול בכלים:
+1. אם כלי מחזיר שגיאה (status: 'error'), עלייך ליידע את המשתמש בדיוק מה נכשל. אל תגידי שהפעולה הצליחה אם היא נכשלה.
+2. אל תשתמשי בפלט של כלי כפרמטר לכלי אחר אלא אם זה הגיוני (למשל, חיפוש מזהה משימה ואז מחיקתה). אל תבצעי קריאות חוזרות מיותרות.
+3. היי כנה לגבי התוצאות.
+
 הכלים שלך:
 - 📅 יומן: צפייה והוספת אירועים (list_calendar_events, add_calendar_event).
 - ✅ משימות: ניהול Google Tasks (list_pending_tasks, add_task, complete_task).
@@ -76,34 +81,40 @@ export async function analyzeIntent(text: string): Promise<string> {
     while (attempts < maxAttempts) {
         try {
             let result = await chat.sendMessage(text);
-            let call = result.response.functionCalls()?.[0];
+            let calls = result.response.functionCalls();
 
             let loopCount = 0;
-            while (call && loopCount < 5) {
-                console.log(`AI invoking tool: ${call.name} with args:`, call.args);
-                const tool = toolRegistry[call.name];
+            while (calls && calls.length > 0 && loopCount < 5) {
+                const functionResponses = [];
 
-                let toolResponseData: Record<string, any>;
-                if (tool) {
-                    try {
-                        toolResponseData = await tool.execute(call.args);
-                    } catch (err: any) {
-                        console.error(`Tool execution error for ${call.name}:`, err.message);
-                        toolResponseData = { error: err.message };
+                for (const call of calls) {
+                    console.log(`AI invoking tool: ${call.name} with args:`, call.args);
+                    const tool = toolRegistry[call.name];
+
+                    let toolResponseData: Record<string, any>;
+                    if (tool) {
+                        try {
+                            toolResponseData = await tool.execute(call.args);
+                            console.log(`Tool ${call.name} returned:`, toolResponseData);
+                        } catch (err: any) {
+                            console.error(`Tool execution error for ${call.name}:`, err.message);
+                            toolResponseData = { status: 'error', error: err.message };
+                        }
+                    } else {
+                        console.error(`Tool ${call.name} not found in registry.`);
+                        toolResponseData = { status: 'error', error: "Tool not found." };
                     }
-                } else {
-                    console.error(`Tool ${call.name} not found in registry.`);
-                    toolResponseData = { error: "Tool not found." };
+
+                    functionResponses.push({
+                        functionResponse: {
+                            name: call.name,
+                            response: toolResponseData
+                        }
+                    });
                 }
 
-                result = await chat.sendMessage([{
-                    functionResponse: {
-                        name: call.name,
-                        response: (typeof toolResponseData === 'object' && toolResponseData !== null) ? toolResponseData : { result: toolResponseData }
-                    }
-                }]);
-
-                call = result.response.functionCalls()?.[0];
+                result = await chat.sendMessage(functionResponses);
+                calls = result.response.functionCalls();
                 loopCount++;
             }
 
@@ -122,6 +133,7 @@ export async function analyzeIntent(text: string): Promise<string> {
             console.error("Gemini API Error:", error.message);
             throw error;
         }
+    }
     }
     throw new Error("Failed after maximum retries.");
 }

@@ -58,6 +58,12 @@ export const calendarTools = {
         },
         execute: async (args: any) => {
             const calendar = await getCalendarClient();
+
+            // Validate that required arguments are strings and not objects
+            if (typeof args.summary !== 'string' || typeof args.startDateTime !== 'string' || typeof args.endDateTime !== 'string') {
+                return { status: "error", error: "Invalid argument format. Summary, startDateTime, and endDateTime must be strings." };
+            }
+
             try {
                 const res = await calendar.events.insert({
                     calendarId: CALENDAR_ID,

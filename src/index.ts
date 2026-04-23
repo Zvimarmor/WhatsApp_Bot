@@ -57,21 +57,28 @@ async function connectToWhatsApp() {
         if (!msg || !msg.message || !msg.key) return;
 
         const botId = sock.user?.id.split(':')[0] || '';
-        const remoteJid = msg.key.remoteJid;
+        const remoteJid = msg.key.remoteJid || '';
+        const isFromMe = msg.key.fromMe;
 
-        // === HARD BLOCK: Never respond in group chats ===
-        if (remoteJid?.endsWith('@g.us') || remoteJid?.endsWith('@broadcast')) return;
+        // 1. HARD BLOCK: Never respond to groups, broadcasts or status
+        if (remoteJid.endsWith('@g.us') || remoteJid.endsWith('@broadcast') || remoteJid === 'status@broadcast') {
+            return;
+        }
 
-        // Only respond to self-chat or owner's direct messages
-        const isSelfChat = remoteJid?.includes(botId);
-        const isOwner = config.ownerPhoneNumber && remoteJid?.includes(config.ownerPhoneNumber);
+        // 2. AUTHORIZATION: Only self-chat or designated owner
+        const isSelfChat = remoteJid.includes(botId);
+        const isOwner = config.ownerPhoneNumber && remoteJid.includes(config.ownerPhoneNumber);
 
         if (!isSelfChat && !isOwner) return;
 
+        // 3. LOOP PREVENTION: Don't respond to our own messages in owner chat
+        // (But allow them in self-chat if they aren't the exact last response to avoid loops)
+        if (isFromMe && remoteJid !== botId && !remoteJid.includes(botId)) return;
+
+        console.log(`[Auth] Processing message from: ${remoteJid} (Self: ${isSelfChat}, Owner: ${isOwner})`);
+
         // Cache self-chat JID
-        if (remoteJid) {
-            setSelfChatJid(remoteJid);
-        }
+        setSelfChatJid(remoteJid);
 
         try {
             // === Handle Voice Messages ===
