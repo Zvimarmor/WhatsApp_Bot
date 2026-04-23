@@ -1,7 +1,7 @@
 node_modules/
 .env
 auth_info_baileys/
-dist/
+#dist/
 messages.db*
 service_account.json
 *.pem
