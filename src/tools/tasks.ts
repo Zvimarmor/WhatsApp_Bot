@@ -113,8 +113,11 @@ export const taskTools = {
             required: ["title"]
         },
         execute: async (args: any) => {
+            console.log(`[Tasks] Attempting to add task: "${args.title}"...`);
             const tasksClient = await getTasksClient();
             const tasklistId = await getTasklistId();
+            console.log(`[Tasks] Using tasklistId: ${tasklistId}`);
+
             try {
                 const res = await tasksClient.tasks.insert({
                     tasklist: tasklistId,
@@ -123,9 +126,13 @@ export const taskTools = {
                         notes: args.notes
                     }
                 });
+                console.log(`[Tasks] Success! Task created with ID: ${res.data.id}`);
                 return { status: "success", task: res.data };
             } catch (err: any) {
-                console.error(`[Tasks] Failed to add task:`, err.message);
+                console.error(`[Tasks] ERROR: Failed to add task:`, err.message);
+                if (err.response) {
+                    console.error(`[Tasks] API Data:`, JSON.stringify(err.response.data, null, 2));
+                }
                 return { status: "error", error: `Failed to add task: ${err.message}` };
             }
         }
