@@ -74,8 +74,8 @@ async function getOrInitializeExpenseSheet(): Promise<string> {
 }
 
 export const expenseTools = {
-    add_expense: {
-        name: "add_expense",
+    write_expense_to_google_sheet_tab: {
+        name: "write_expense_to_google_sheet_tab",
         description: "Append a new expense record to the 'Expenses' worksheet tab inside the 'astra_bot_expenses' Google Sheet.",
         parameters: {
             type: "object",

@@ -86,8 +86,8 @@ async function getNextTaskId(sheets: any, sheetId: string): Promise<string> {
 }
 
 export const taskTools = {
-    add_task_to_sheet: {
-        name: "add_task_to_sheet",
+    write_task_to_google_sheet_tab: {
+        name: "write_task_to_google_sheet_tab",
         description: "Add a new task record to the 'Tasks' worksheet tab inside the 'astra_bot_expenses' Google Sheet. Use this for ALL task management.",
         parameters: {
             type: "object",
@@ -122,8 +122,8 @@ export const taskTools = {
             }
         }
     },
-    list_tasks_from_sheet: {
-        name: "list_tasks_from_sheet",
+    read_pending_tasks_from_google_sheet: {
+        name: "read_pending_tasks_from_google_sheet",
         description: "Read all pending task records from the 'Tasks' worksheet tab inside the 'astra_bot_expenses' Google Sheet.",
         parameters: { type: "object", properties: {} },
         execute: async (args: any) => {
@@ -144,8 +144,8 @@ export const taskTools = {
             }
         }
     },
-    complete_task_in_sheet: {
-        name: "complete_task_in_sheet",
+    mark_task_completed_in_google_sheet: {
+        name: "mark_task_completed_in_google_sheet",
         description: "Update a task record status to 'Completed' in the 'Tasks' worksheet tab inside the 'astra_bot_expenses' Google Sheet.",
         parameters: { type: "object", properties: { taskId: { type: "string", description: "The T-ID (e.g. T1) or part of the title" } }, required: ["taskId"] },
         execute: async (args: any) => {
@@ -172,8 +172,8 @@ export const taskTools = {
             }
         }
     },
-    delete_task: {
-        name: "delete_task",
+    delete_task_from_google_sheet: {
+        name: "delete_task_from_google_sheet",
         description: "Permanently delete a task row from the 'Tasks' worksheet tab inside the 'astra_bot_expenses' Google Sheet.",
         parameters: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] },
         execute: async (args: any) => {

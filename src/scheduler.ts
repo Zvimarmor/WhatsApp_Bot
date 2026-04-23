@@ -39,7 +39,7 @@ async function sendProactiveMessage(sock: any, type: 'morning' | 'evening') {
 
     try {
         const calendarRes = await toolRegistry.list_calendar_events.execute({ maxResults: 10 });
-        const tasksRes = await toolRegistry.list_tasks_from_sheet.execute({});
+        const tasksRes = await toolRegistry.read_pending_tasks_from_google_sheet.execute({});
         
         const events = calendarRes.events || [];
         const tasks = tasksRes.tasks || [];
