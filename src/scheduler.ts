@@ -39,7 +39,7 @@ async function sendProactiveMessage(sock: any, type: 'morning' | 'evening') {
 
     try {
         const calendarRes = await toolRegistry.list_calendar_events.execute({ maxResults: 10 });
-        const tasksRes = await toolRegistry.list_pending_tasks.execute({ maxResults: 20 });
+        const tasksRes = await toolRegistry.list_pending_tasks.execute({});
         
         const events = calendarRes.events || [];
         const tasks = tasksRes.tasks || [];
