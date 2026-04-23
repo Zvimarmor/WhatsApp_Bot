@@ -7,10 +7,10 @@ const SCOPES = [
     'https://www.googleapis.com/auth/drive.readonly'
 ];
 const KEY_PATH = path.join(process.cwd(), 'service_account.json');
+const SPREADSHEET_ID = 'astra_bot_expenses';
 const TASKS_TAB = 'Tasks';
 
 let cachedSheetId: string | null = null;
-let resolvedTasksTabName: string | null = null;
 
 function getAuthClient() {
     if (!fs.existsSync(KEY_PATH)) {
@@ -23,20 +23,20 @@ function getAuthClient() {
 }
 
 // Strictly targets the 'Tasks' worksheet tab. Creates it if missing.
-async function getSheetInfo(): Promise<{ id: string, tab: string }> {
-    if (cachedSheetId && resolvedTasksTabName) return { id: cachedSheetId, tab: resolvedTasksTabName };
+async function getOrInitializeTasksSheet(): Promise<string> {
+    if (cachedSheetId) return cachedSheetId;
 
     const auth = getAuthClient();
     const drive = google.drive({ version: 'v3', auth });
 
     const res = await drive.files.list({
-        q: "name='astra_bot_expenses' and mimeType='application/vnd.google-apps.spreadsheet'",
+        q: `name='${SPREADSHEET_ID}' and mimeType='application/vnd.google-apps.spreadsheet'`,
         fields: 'files(id)',
     });
 
     const files = res.data.files;
     if (!files || files.length === 0 || !files[0].id) {
-        throw new Error("Spreadsheet 'astra_bot_expenses' not found. Ensure it is shared with the service account email.");
+        throw new Error(`Spreadsheet '${SPREADSHEET_ID}' not found. Ensure it is shared with the service account email.`);
     }
     const sheetId = files[0].id;
     cachedSheetId = sheetId;
@@ -46,7 +46,7 @@ async function getSheetInfo(): Promise<{ id: string, tab: string }> {
     const sheets_list = spreadsheet.data.sheets || [];
 
     // Find 'Tasks' tab
-    let targetTab = sheets_list.find(s => s.properties?.title === TASKS_TAB);
+    const targetTab = sheets_list.find(s => s.properties?.title === TASKS_TAB);
 
     if (!targetTab) {
         console.log(`[Tasks] '${TASKS_TAB}' tab not found. Creating it immediately...`);
@@ -56,36 +56,23 @@ async function getSheetInfo(): Promise<{ id: string, tab: string }> {
                 requests: [{ addSheet: { properties: { title: TASKS_TAB } } }]
             }
         });
-        resolvedTasksTabName = TASKS_TAB;
-    } else {
-        resolvedTasksTabName = targetTab.properties?.title || TASKS_TAB;
-    }
-
-    console.log(`[Tasks] Target tab active: '${resolvedTasksTabName}'`);
-
-    // Initialize headers ONLY if completely empty
-    const checkRes = await sheets.spreadsheets.values.get({
-        spreadsheetId: sheetId,
-        range: `'${resolvedTasksTabName}'!A1:Z100`,
-    });
-
-    if (!checkRes.data.values || checkRes.data.values.length === 0) {
-        console.log(`[Tasks] Tab is empty. Initializing headers in '${resolvedTasksTabName}'...`);
+        
+        console.log(`[Tasks] Initializing headers in '${TASKS_TAB}'...`);
         await sheets.spreadsheets.values.update({
             spreadsheetId: sheetId,
-            range: `'${resolvedTasksTabName}'!A1:E1`,
+            range: `'${TASKS_TAB}'!A1:E1`,
             valueInputOption: 'USER_ENTERED',
             requestBody: { values: [['ID', 'Date', 'Task', 'Status', 'Priority']] }
         });
     }
 
-    return { id: sheetId, tab: resolvedTasksTabName! };
+    return sheetId;
 }
 
-async function getNextTaskId(sheets: any, sheetId: string, tabName: string): Promise<string> {
+async function getNextTaskId(sheets: any, sheetId: string): Promise<string> {
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: sheetId,
-        range: `'${tabName}'!A:A`,
+        range: `'${TASKS_TAB}'!A:A`, // Explicitly hardcoded tab name to solve range errors
     });
     const rows = res.data.values || [];
     let maxNum = 0;
@@ -112,16 +99,16 @@ export const taskTools = {
         },
         execute: async (args: any) => {
             try {
-                const { id, tab } = await getSheetInfo();
+                const id = await getOrInitializeTasksSheet();
                 const auth = getAuthClient();
                 const sheets = google.sheets({ version: 'v4', auth });
-                const taskId = await getNextTaskId(sheets, id, tab);
+                const taskId = await getNextTaskId(sheets, id);
                 const date = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jerusalem' });
                 const priority = args.priority || 'medium';
 
                 await sheets.spreadsheets.values.append({
                     spreadsheetId: id,
-                    range: `'${tab}'!A:E`,
+                    range: `'${TASKS_TAB}'!A:E`, // Explicitly hardcoded
                     valueInputOption: 'USER_ENTERED',
                     insertDataOption: 'INSERT_ROWS',
                     requestBody: {
@@ -130,6 +117,7 @@ export const taskTools = {
                 });
                 return { status: "success", taskId, message: `משימה ${taskId} נוספה לגיליון.` };
             } catch (err: any) {
+                console.error("[Tasks] Error adding task:", err);
                 return { status: "error", error: err.message };
             }
         }
@@ -140,17 +128,18 @@ export const taskTools = {
         parameters: { type: "object", properties: {} },
         execute: async (args: any) => {
             try {
-                const { id, tab } = await getSheetInfo();
+                const id = await getOrInitializeTasksSheet();
                 const auth = getAuthClient();
                 const sheets = google.sheets({ version: 'v4', auth });
                 const res = await sheets.spreadsheets.values.get({
                     spreadsheetId: id,
-                    range: `'${tab}'!A:E`,
+                    range: `'${TASKS_TAB}'!A:E`, // Explicitly hardcoded
                 });
                 const rows = res.data.values || [];
                 const tasks = rows.slice(1).filter(r => (r[3] || '').toLowerCase() === 'pending').map(r => ({ id: r[0], date: r[1], title: r[2], status: r[3], priority: r[4] }));
                 return { tasks };
             } catch (err: any) {
+                console.error("[Tasks] Error listing tasks:", err);
                 return { status: "error", error: err.message };
             }
         }
@@ -161,17 +150,24 @@ export const taskTools = {
         parameters: { type: "object", properties: { taskId: { type: "string", description: "The T-ID (e.g. T1) or part of the title" } }, required: ["taskId"] },
         execute: async (args: any) => {
             try {
-                const { id, tab } = await getSheetInfo();
+                const id = await getOrInitializeTasksSheet();
                 const auth = getAuthClient();
                 const sheets = google.sheets({ version: 'v4', auth });
-                const res = await sheets.spreadsheets.values.get({ spreadsheetId: id, range: `'${tab}'!A:E` });
+                const res = await sheets.spreadsheets.values.get({ spreadsheetId: id, range: `'${TASKS_TAB}'!A:E` }); // Explicitly hardcoded
                 const rows = res.data.values || [];
                 const search = (args.taskId || '').toLowerCase();
                 const idx = rows.findIndex((r, i) => i > 0 && (r[0].toLowerCase() === search || r[2].toLowerCase().includes(search)) && (r[3] || '').toLowerCase() === 'pending');
                 if (idx === -1) return { status: "error", error: "משימה לא נמצאה או שכבר הושלמה" };
-                await sheets.spreadsheets.values.update({ spreadsheetId: id, range: `'${tab}'!D${idx + 1}`, valueInputOption: 'USER_ENTERED', requestBody: { values: [['Completed']] } });
+                
+                await sheets.spreadsheets.values.update({ 
+                    spreadsheetId: id, 
+                    range: `'${TASKS_TAB}'!D${idx + 1}`, // Explicitly hardcoded
+                    valueInputOption: 'USER_ENTERED', 
+                    requestBody: { values: [['Completed']] } 
+                });
                 return { status: "success", message: "המשימה סומנה כהושלמה בגיליון" };
             } catch (err: any) {
+                console.error("[Tasks] Error completing task:", err);
                 return { status: "error", error: err.message };
             }
         }
@@ -182,19 +178,26 @@ export const taskTools = {
         parameters: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] },
         execute: async (args: any) => {
             try {
-                const { id, tab } = await getSheetInfo();
+                const id = await getOrInitializeTasksSheet();
                 const auth = getAuthClient();
                 const sheets = google.sheets({ version: 'v4', auth });
+                
                 const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: id });
-                const sheetId = spreadsheet.data.sheets?.find(s => s.properties?.title === tab)?.properties?.sheetId;
-                const tasksRes = await sheets.spreadsheets.values.get({ spreadsheetId: id, range: `'${tab}'!A:E` });
+                const sheetId = spreadsheet.data.sheets?.find(s => s.properties?.title === TASKS_TAB)?.properties?.sheetId;
+                
+                const tasksRes = await sheets.spreadsheets.values.get({ spreadsheetId: id, range: `'${TASKS_TAB}'!A:E` }); // Explicitly hardcoded
                 const rows = tasksRes.data.values || [];
                 const search = (args.taskId || '').toLowerCase();
                 const idx = rows.findIndex((r, i) => i > 0 && (r[0].toLowerCase() === search || r[2].toLowerCase().includes(search)));
                 if (idx === -1) return { status: "error", error: "משימה לא נמצאה" };
-                await sheets.spreadsheets.batchUpdate({ spreadsheetId: id, requestBody: { requests: [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: idx, endIndex: idx + 1 } } }] } });
+                
+                await sheets.spreadsheets.batchUpdate({ 
+                    spreadsheetId: id, 
+                    requestBody: { requests: [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: idx, endIndex: idx + 1 } } }] } 
+                });
                 return { status: "success", message: "המשימה נמחקה מהגיליון" };
             } catch (err: any) {
+                console.error("[Tasks] Error deleting task:", err);
                 return { status: "error", error: err.message };
             }
         }

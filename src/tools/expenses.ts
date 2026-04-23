@@ -8,10 +8,10 @@ const SCOPES = [
     'https://www.googleapis.com/auth/drive.readonly'
 ];
 const KEY_PATH = path.join(process.cwd(), 'service_account.json');
+const SPREADSHEET_ID = 'astra_bot_expenses'; // We will search for this by name
 const EXPENSES_TAB = 'Expenses';
 
 let cachedSheetId: string | null = null;
-let resolvedExpensesTabName: string | null = null;
 
 async function getAuthClient() {
     if (!fs.existsSync(KEY_PATH)) {
@@ -24,20 +24,20 @@ async function getAuthClient() {
 }
 
 // Strictly targets the 'Expenses' worksheet tab. Creates it if missing.
-async function getOrInitializeExpenseSheet(): Promise<{ id: string, tab: string }> {
-    if (cachedSheetId && resolvedExpensesTabName) return { id: cachedSheetId, tab: resolvedExpensesTabName };
+async function getOrInitializeExpenseSheet(): Promise<string> {
+    if (cachedSheetId) return cachedSheetId;
 
     const auth = await getAuthClient();
     const drive = google.drive({ version: 'v3', auth });
 
     const res = await drive.files.list({
-        q: "name='astra_bot_expenses' and mimeType='application/vnd.google-apps.spreadsheet'",
+        q: `name='${SPREADSHEET_ID}' and mimeType='application/vnd.google-apps.spreadsheet'`,
         fields: 'files(id)',
     });
 
     const files = res.data.files;
     if (!files || files.length === 0 || !files[0].id) {
-        throw new Error("Spreadsheet 'astra_bot_expenses' not found.");
+        throw new Error(`Spreadsheet '${SPREADSHEET_ID}' not found.`);
     }
     const sheetId = files[0].id;
     cachedSheetId = sheetId;
@@ -46,8 +46,8 @@ async function getOrInitializeExpenseSheet(): Promise<{ id: string, tab: string 
     const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
     const sheets_list = spreadsheet.data.sheets || [];
 
-    // Find 'Expenses' tab
-    let targetTab = sheets_list.find(s => s.properties?.title === EXPENSES_TAB);
+    // Check if 'Expenses' tab exists
+    const targetTab = sheets_list.find(s => s.properties?.title === EXPENSES_TAB);
 
     if (!targetTab) {
         console.log(`[Expenses] '${EXPENSES_TAB}' tab not found. Creating it immediately...`);
@@ -57,24 +57,12 @@ async function getOrInitializeExpenseSheet(): Promise<{ id: string, tab: string 
                 requests: [{ addSheet: { properties: { title: EXPENSES_TAB } } }]
             }
         });
-        resolvedExpensesTabName = EXPENSES_TAB;
-    } else {
-        resolvedExpensesTabName = targetTab.properties?.title || EXPENSES_TAB;
-    }
-
-    console.log(`[Expenses] Target tab active: '${resolvedExpensesTabName}'`);
-
-    // Initialize headers ONLY if completely empty
-    const checkRes = await sheets.spreadsheets.values.get({
-        spreadsheetId: sheetId,
-        range: `'${resolvedExpensesTabName}'!A1:Z100`,
-    });
-
-    if (!checkRes.data.values || checkRes.data.values.length === 0) {
-        console.log(`[Expenses] Tab is empty. Initializing headers in '${resolvedExpensesTabName}'...`);
+        
+        // Initialize headers for the new tab
+        console.log(`[Expenses] Initializing headers in '${EXPENSES_TAB}'...`);
         await sheets.spreadsheets.values.update({
             spreadsheetId: sheetId,
-            range: `'${resolvedExpensesTabName}'!A1:D1`,
+            range: `'${EXPENSES_TAB}'!A1:D1`,
             valueInputOption: 'USER_ENTERED',
             requestBody: {
                 values: [['Date', 'Description', 'Amount', 'Category']]
@@ -82,7 +70,7 @@ async function getOrInitializeExpenseSheet(): Promise<{ id: string, tab: string 
         });
     }
 
-    return { id: sheetId, tab: resolvedExpensesTabName };
+    return sheetId;
 }
 
 export const expenseTools = {
@@ -103,13 +91,13 @@ export const expenseTools = {
                 const date = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jerusalem' });
                 addExpenseToDb(args.amount, args.category, args.description, date);
 
-                const { id, tab } = await getOrInitializeExpenseSheet();
+                const id = await getOrInitializeExpenseSheet();
                 const auth = await getAuthClient();
                 const sheets = google.sheets({ version: 'v4', auth });
 
                 await sheets.spreadsheets.values.append({
                     spreadsheetId: id,
-                    range: `'${tab}'!A:D`,
+                    range: `'${EXPENSES_TAB}'!A:D`, // Explicitly hardcoded tab name to solve range errors
                     valueInputOption: 'USER_ENTERED',
                     insertDataOption: 'INSERT_ROWS',
                     requestBody: {
@@ -119,6 +107,7 @@ export const expenseTools = {
 
                 return { status: "success", message: `הוצאה ע"ס ${args.amount} ₪ נרשמה בגיליון.` };
             } catch (err: any) {
+                console.error("[Expenses] Error adding expense:", err);
                 return { status: "error", error: err.message };
             }
         }
