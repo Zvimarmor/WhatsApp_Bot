@@ -35,10 +35,48 @@ export const toolRegistry: Record<string, Tool> = {
     ...expenseTools
 };
 
+// Normalize all tool parameters to use SchemaType enums so Gemini actually recognizes them
+function normalizeSchema(schema: any): any {
+    if (!schema || typeof schema !== 'object') return schema;
+
+    const result: any = { ...schema };
+
+    // Convert string type to SchemaType enum
+    if (typeof result.type === 'string') {
+        const typeMap: Record<string, any> = {
+            'object': SchemaType.OBJECT,
+            'string': SchemaType.STRING,
+            'number': SchemaType.NUMBER,
+            'boolean': SchemaType.BOOLEAN,
+            'array': SchemaType.ARRAY,
+            'integer': SchemaType.INTEGER,
+        };
+        result.type = typeMap[result.type.toLowerCase()] || result.type;
+    }
+
+    // Recursively normalize properties
+    if (result.properties) {
+        const normalized: any = {};
+        for (const [key, value] of Object.entries(result.properties)) {
+            normalized[key] = normalizeSchema(value);
+        }
+        result.properties = normalized;
+    }
+
+    // Normalize items (for arrays)
+    if (result.items) {
+        result.items = normalizeSchema(result.items);
+    }
+
+    return result;
+}
+
 export const getGeminiTools = (): FunctionDeclaration[] => {
-    return Object.values(toolRegistry).map(t => ({
+    const tools = Object.values(toolRegistry).map(t => ({
         name: t.name,
         description: t.description,
-        parameters: t.parameters
+        parameters: normalizeSchema(t.parameters)
     }));
+    console.log(`[Registry] Registered ${tools.length} tools: ${tools.map(t => t.name).join(', ')}`);
+    return tools;
 };
