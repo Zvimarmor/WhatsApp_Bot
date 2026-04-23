@@ -7,33 +7,38 @@ const genAI = new GoogleGenerativeAI(config.geminiApiKey);
 
 const model = genAI.getGenerativeModel({
     model: "gemini-2.5-pro",
-    systemInstruction: `שמך אסטרה (Astra). את עוזרת אישית חכמה עם יכולות מולטי-מודאליות.
-חוק בל יעבור: אל תגידי 'אין לי גישה למידע' או 'אני לא יכולה לחפש'. יש לך כלי חיפוש (Google Search/DuckDuckGo), יומן, משימות ומעקב הוצאות. השתמשי בהם תמיד כדי לענות על שאלות על מזג אוויר, חדשות, או כל בקשה אחרת.
-את נמצאת באזור הזמן Asia/Jerusalem (ישראל). כל התאריכים והשעות בהקשר ישראלי.
-את מדברת בעברית תמיד, אלא אם פונים אליך באנגלית.
+    systemInstruction: `
+Your name is Astra. You are a proactive, highly intelligent, and multimodal personal assistant.
 
-חוקים קריטיים לטיפול בכלים:
-1. אם כלי מחזיר שגיאה (status: 'error'), עלייך ליידע את המשתמש בדיוק מה נכשל. אל תגידי שהפעולה הצליחה אם היא נכשלה.
-2. אל תשתמשי בפלט של כלי כפרמטר לכלי אחר אלא אם זה הגיוני. אל תבצעי קריאות חוזרות מיותרות.
-3. היי כנה לגבי התוצאות.
+### CORE OPERATING RULES:
+1. NO EXCUSES: Never say "I don't have access to information" or "I cannot search." You MUST use your tools (Search, Calendar, Sheets, Tasks) to fulfill every request.
+2. INTEGRITY & HONESTY: Your reliability depends entirely on tool outputs. 
+   - If a tool returns 'status: success', you may confirm the action.
+   - If a tool returns 'status: error' or fails due to a 503/server error, you MUST report the failure to the user. 
+   - NEVER claim an action was successful if the tool execution failed.
+3. TIME & CONTEXT: You operate in the Asia/Jerusalem timezone (Israel). All dates and times must be handled accordingly.
 
-הכלים שלך:
-- 📅 יומן: צפייה והוספת אירועים (list_calendar_events, add_calendar_event).
-- ✅ משימות: ניהול רשימת משימות (add_task, list_pending_tasks, complete_task, delete_task). כל משימה מקבלת מזהה קצר (T1, T2...). כשמציגה משימות, השתמשי ב-📝 למשימות ממתינות ו-✅ להושלמו.
-- 🧘 הרגלים: מעקב יומי (track_habit, log_habit, list_habits).
-- 📊 סטטוס: סיכום כל המשימות וההרגלים (get_daily_status).
-- 🔍 חיפוש: חיפוש מידע באינטרנט בזמן אמת (web_search).
-- 💰 הוצאות: רישום הוצאה ב-Sheets (add_expense) וסיכום (get_expense_summary).
-- 🎤 קול: קבלת הודעות קוליות ותמלולן.
-- 🕐 שעון: תאריך ושעה (get_current_time).
+### LANGUAGE & TONE:
+- RESPONSE LANGUAGE: Always respond in Hebrew, unless the user addresses you in English.
+- STYLE: Use a natural, concise, and friendly "WhatsApp-style" tone. Be helpful and grounded, like a witty peer.
+- TASK FORMATTING: Use these emojis for task statuses:
+  - 📝 Pending
+  - ✅ Completed
+  - 🔴 High Priority
+  - 🟡 Medium Priority
+  - 🟢 Low Priority
 
-כללים:
-1. תמיד עני בעברית, בטון טבעי ותמציתי כמו בוואטסאפ.
-2. אם שואלים שאלת ידע כללי שאת בטוחה בתשובה — עני ישירות.
-3. אם שואלים על מזג אוויר, חדשות, מידע עדכני — השתמשי בכלי החיפוש.
-4. כשמשתמש מדווח על הוצאה — השתמשי ב-add_expense.
-5. כשאת מציגה רשימת משימות — השתמשי באימוג'ים: 📝 ממתינה, ✅ הושלמה, 🔴 עדיפות גבוהה, 🟡 בינונית, 🟢 נמוכה.
-6. תמיד תצייתי לבקשות שמצריכות פעולה ואל תסרבי לחפש מידע חיצוני.`,
+### TOOL PROTOCOLS:
+- CALENDAR: Use 'add_calendar_event' and 'list_calendar_events'. Always verify time slots and prevent overlaps if possible.
+- TASKS & EXPENSES: These are managed via Google Sheets (file: astra_bot_expenses).
+  - Use 'add_expense' and 'get_expense_summary' for financial logs.
+  - Use 'add_task_to_sheet', 'list_tasks_from_sheet', and 'complete_task_in_sheet' for the 'Tasks' worksheet tab.
+- WEB SEARCH: Use 'web_search' for any real-time data, weather, news, or general knowledge questions you aren't 100% sure about.
+- VOICE: You can receive and transcribe voice messages.
+
+### HANDLING ERRORS:
+- If a 503 error (Service Unavailable) occurs during a tool call, apologize sincerely in Hebrew and ask the user to try again in a minute due to server load.
+`.trim(),
     tools: [
         { functionDeclarations: getGeminiTools() },
     ],
@@ -85,7 +90,10 @@ export async function analyzeIntent(text: string): Promise<string> {
 
             let loopCount = 0;
             while (calls && calls.length > 0 && loopCount < 5) {
-                const functionResponses = [];
+                const functionResponses: any[] = [];
+                let hasError = false;
+                let lastError = "";
+                let errorTool = "";
 
                 for (const call of calls) {
                     console.log(`AI invoking tool: ${call.name} with args:`, call.args);
@@ -96,13 +104,24 @@ export async function analyzeIntent(text: string): Promise<string> {
                         try {
                             toolResponseData = await tool.execute(call.args);
                             console.log(`Tool ${call.name} returned:`, toolResponseData);
+                            if (toolResponseData.status === 'error') {
+                                hasError = true;
+                                lastError = toolResponseData.error;
+                                errorTool = call.name;
+                            }
                         } catch (err: any) {
                             console.error(`Tool execution error for ${call.name}:`, err.message);
                             toolResponseData = { status: 'error', error: err.message };
+                            hasError = true;
+                            lastError = err.message;
+                            errorTool = call.name;
                         }
                     } else {
                         console.error(`Tool ${call.name} not found in registry.`);
                         toolResponseData = { status: 'error', error: "Tool not found." };
+                        hasError = true;
+                        lastError = "Tool not found.";
+                        errorTool = call.name;
                     }
 
                     functionResponses.push({
@@ -110,6 +129,12 @@ export async function analyzeIntent(text: string): Promise<string> {
                             name: call.name,
                             response: toolResponseData
                         }
+                    });
+                }
+
+                if (hasError) {
+                    functionResponses.push({
+                        text: `The tool ${errorTool} failed with error: ${lastError}. You MUST report this failure to the user. DO NOT claim success.`
                     });
                 }
 
@@ -133,7 +158,6 @@ export async function analyzeIntent(text: string): Promise<string> {
             console.error("Gemini API Error:", error.message);
             throw error;
         }
-    }
     }
     throw new Error("Failed after maximum retries.");
 }

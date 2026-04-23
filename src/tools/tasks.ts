@@ -110,9 +110,9 @@ async function getNextTaskId(sheets: any, sheetId: string, tabName: string): Pro
 }
 
 export const taskTools = {
-    add_task: {
-        name: "add_task",
-        description: "Add a new task to the user's task list. Priority can be: high, medium, low.",
+    add_task_to_sheet: {
+        name: "add_task_to_sheet",
+        description: "Add a new task to the Google Sheets task list. Priority can be: high, medium, low.",
         parameters: {
             type: "object",
             properties: {
@@ -151,9 +151,9 @@ export const taskTools = {
         }
     },
 
-    list_pending_tasks: {
-        name: "list_pending_tasks",
-        description: "List all pending (incomplete) tasks.",
+    list_tasks_from_sheet: {
+        name: "list_tasks_from_sheet",
+        description: "List all pending (incomplete) tasks from the Google Sheets task list.",
         parameters: { type: "object", properties: {} },
         execute: async () => {
             console.log(`[Tasks] Listing pending tasks...`);
@@ -186,9 +186,9 @@ export const taskTools = {
         }
     },
 
-    complete_task: {
-        name: "complete_task",
-        description: "Mark a task as completed by its ID (e.g. T1, T2) or by its name.",
+    complete_task_in_sheet: {
+        name: "complete_task_in_sheet",
+        description: "Mark a task as completed in the Google Sheets task list by its ID (e.g. T1, T2) or by its name.",
         parameters: {
             type: "object",
             properties: {
