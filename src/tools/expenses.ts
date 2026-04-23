@@ -23,137 +23,107 @@ async function getAuthClient() {
     });
 }
 
-// Find the astra_bot_expenses spreadsheet and ensure an "Expenses" tab exists or find the first one
-async function getOrInitializeExpenseSheet(): Promise<{ id: string, tab: string } | null> {
+async function getOrInitializeExpenseSheet(): Promise<{ id: string, tab: string }> {
     if (cachedSheetId && resolvedExpensesTabName) return { id: cachedSheetId, tab: resolvedExpensesTabName };
 
     const auth = await getAuthClient();
     const drive = google.drive({ version: 'v3', auth });
 
-    try {
-        const res = await drive.files.list({
-            q: "name='astra_bot_expenses' and mimeType='application/vnd.google-apps.spreadsheet'",
-            fields: 'files(id, name)',
-        });
+    const res = await drive.files.list({
+        q: "name='astra_bot_expenses' and mimeType='application/vnd.google-apps.spreadsheet'",
+        fields: 'files(id)',
+    });
 
-        const files = res.data.files;
-        if (!files || files.length === 0 || !files[0].id) {
-            console.error('[Expenses] Could not find spreadsheet named "astra_bot_expenses".');
-            return null;
-        }
+    const files = res.data.files;
+    if (!files || files.length === 0 || !files[0].id) {
+        throw new Error("Spreadsheet 'astra_bot_expenses' not found.");
+    }
+    const sheetId = files[0].id;
+    cachedSheetId = sheetId;
 
-        const sheetId = files[0].id;
-        cachedSheetId = sheetId;
+    const sheets = google.sheets({ version: 'v4', auth });
+    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+    const sheets_list = spreadsheet.data.sheets || [];
 
-        const sheets = google.sheets({ version: 'v4', auth });
-        const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
-        const sheets_list = spreadsheet.data.sheets || [];
+    // 1. Try to find a sheet named 'Expenses'
+    let targetTab = sheets_list.find(s => s.properties?.title === EXPENSES_TAB);
 
-        // 1. Try to find a sheet named 'Expenses'
-        let targetTab = sheets_list.find(s => s.properties?.title === EXPENSES_TAB);
+    // 2. Fallback to the first sheet if not found
+    if (!targetTab && sheets_list.length > 0) {
+        targetTab = sheets_list[0];
+        console.log(`[Expenses] '${EXPENSES_TAB}' tab not found, falling back to first sheet: '${targetTab.properties?.title}'`);
+    }
 
-        if (!targetTab) {
-            // 2. If not found, and there's only one sheet (likely the default 'Sheet1' or 'גיליון1'), use it
-            if (sheets_list.length === 1) {
-                targetTab = sheets_list[0];
-                console.log(`[Expenses] No 'Expenses' tab found, defaulting to the only existing tab: '${targetTab.properties?.title}'`);
-            } else {
-                // 3. If many sheets exist but none named 'Expenses', create it
-                console.log(`[Expenses] Creating '${EXPENSES_TAB}' tab...`);
-                await sheets.spreadsheets.batchUpdate({
-                    spreadsheetId: sheetId,
-                    requestBody: {
-                        requests: [{ addSheet: { properties: { title: EXPENSES_TAB } } }]
-                    }
-                });
-                // Re-fetch to get correct name (though we know it's EXPENSES_TAB now)
-                resolvedExpensesTabName = EXPENSES_TAB;
-            }
-        }
+    if (!targetTab || !targetTab.properties?.title) {
+        throw new Error("Sheet Expenses not found. Please ensure the tabs are named correctly.");
+    }
 
-        if (targetTab) {
-            resolvedExpensesTabName = targetTab.properties?.title || EXPENSES_TAB;
-        }
+    resolvedExpensesTabName = targetTab.properties.title;
+    console.log(`[Expenses] Using tab: '${resolvedExpensesTabName}'`);
 
-        console.log(`[Expenses] Target Tab identified as: '${resolvedExpensesTabName}'`);
+    // 3. Initialize headers ONLY if sheet is completely empty
+    const checkRes = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range: `'${resolvedExpensesTabName}'!A1:Z100`, // Check wide range
+    });
 
-        // Initialize headers if they don't exist in the target tab
-        const headerRes = await sheets.spreadsheets.values.get({
+    if (!checkRes.data.values || checkRes.data.values.length === 0) {
+        console.log(`[Expenses] Sheet is empty. Initializing headers in '${resolvedExpensesTabName}'...`);
+        await sheets.spreadsheets.values.update({
             spreadsheetId: sheetId,
             range: `'${resolvedExpensesTabName}'!A1:D1`,
+            valueInputOption: 'USER_ENTERED',
+            requestBody: {
+                values: [['Date', 'Description', 'Amount', 'Category']]
+            }
         });
-
-        const values = headerRes.data.values;
-        if (!values || values.length === 0 || values[0].length === 0) {
-            console.log(`[Expenses] Initializing headers in '${resolvedExpensesTabName}'...`);
-            await sheets.spreadsheets.values.update({
-                spreadsheetId: sheetId,
-                range: `'${resolvedExpensesTabName}'!A1:D1`,
-                valueInputOption: 'USER_ENTERED',
-                requestBody: {
-                    values: [['Date', 'Description', 'Amount', 'Category']]
-                }
-            });
-        }
-
-        return { id: sheetId, tab: resolvedExpensesTabName };
-    } catch (err: any) {
-        console.error('[Expenses] Failed to get/init expense sheet:', err.message);
-        return null;
     }
+
+    return { id: sheetId, tab: resolvedExpensesTabName };
 }
 
 export const expenseTools = {
     add_expense: {
         name: "add_expense",
-        description: "Log an expense. Use when the user reports spending money (e.g. '50 שח על קפה').",
+        description: "Log an expense. Use when the user reports spending money.",
         parameters: {
             type: "object",
             properties: {
                 amount: { type: "number", description: "Amount spent in NIS" },
-                category: { type: "string", description: "Category: food, transport, health, shopping, bills, entertainment, other" },
-                description: { type: "string", description: "Short description of the expense" }
+                category: { type: "string", description: "Category" },
+                description: { type: "string", description: "Description" }
             },
             required: ["amount", "category", "description"]
         },
         execute: async (args: any) => {
-            const date = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jerusalem' });
+            try {
+                const date = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jerusalem' });
+                addExpenseToDb(args.amount, args.category, args.description, date);
 
-            // Save to local DB
-            addExpenseToDb(args.amount, args.category, args.description, date);
+                const { id, tab } = await getOrInitializeExpenseSheet();
+                const auth = await getAuthClient();
+                const sheets = google.sheets({ version: 'v4', auth });
 
-            // Save to Google Sheets
-            const sheetInfo = await getOrInitializeExpenseSheet();
-            if (sheetInfo) {
-                try {
-                    const auth = await getAuthClient();
-                    const sheets = google.sheets({ version: 'v4', auth });
-                    console.log(`[Expenses] Appending to range: '${sheetInfo.tab}'!A:D`);
-                    await sheets.spreadsheets.values.append({
-                        spreadsheetId: sheetInfo.id,
-                        range: `'${sheetInfo.tab}'!A:D`,
-                        valueInputOption: 'USER_ENTERED',
-                        insertDataOption: 'INSERT_ROWS',
-                        requestBody: {
-                            values: [[
-                                date,
-                                args.description,
-                                args.amount,
-                                args.category
-                            ]]
-                        }
-                    });
-                } catch (err: any) {
-                    console.error('[Expenses] Failed to write to Google Sheets:', err.message);
-                }
+                await sheets.spreadsheets.values.append({
+                    spreadsheetId: id,
+                    range: `'${tab}'!A:D`,
+                    valueInputOption: 'USER_ENTERED',
+                    insertDataOption: 'INSERT_ROWS',
+                    requestBody: {
+                        values: [[date, args.description, args.amount, args.category]]
+                    }
+                });
+
+                return { status: "success", message: `נרשמה הוצאה: ${args.amount} ₪ - ${args.description}` };
+            } catch (err: any) {
+                console.error('[Expenses] Error:', err.message);
+                return { status: "error", error: err.message };
             }
-
-            return { result: `נרשמה הוצאה: ${args.amount} ₪ - ${args.description} (${args.category})` };
         }
     },
     get_expense_summary: {
         name: "get_expense_summary",
-        description: "Get a summary of recent expenses. Can specify period: 'week' or 'month'.",
+        description: "Get summary of recent expenses.",
         parameters: {
             type: "object",
             properties: {
@@ -161,9 +131,7 @@ export const expenseTools = {
             }
         },
         execute: async (args: any) => {
-            const period = args.period || 'week';
-            const summary = getExpenseSummaryFromDb(period);
-            return summary;
+            return getExpenseSummaryFromDb(args.period || 'week');
         }
     }
 };

@@ -6,7 +6,7 @@ export const dailyStatusTools = {
         name: "get_daily_status",
         description: "Get a unified daily status summary of pending tasks and unlogged habits.",
         parameters: { type: "object", properties: {} },
-        execute: async () => {
+        execute: async (args: any) => {
             const tasksRes = await taskTools.list_tasks_from_sheet.execute({});
             const habitsRes = await habitTools.list_habits.execute({});
 

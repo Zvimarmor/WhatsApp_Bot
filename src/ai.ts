@@ -86,42 +86,32 @@ export async function analyzeIntent(text: string): Promise<string> {
     while (attempts < maxAttempts) {
         try {
             let result = await chat.sendMessage(text);
-            let calls = result.response.functionCalls();
-
             let loopCount = 0;
-            while (calls && calls.length > 0 && loopCount < 5) {
+            while (loopCount < 5) {
+                const calls = result.response.functionCalls();
+                if (!calls || calls.length === 0) break;
+
+                console.log(`[AI] Handling ${calls.length} tool calls...`);
                 const functionResponses: any[] = [];
-                let hasError = false;
-                let lastError = "";
-                let errorTool = "";
+                const toolErrors: string[] = [];
 
                 for (const call of calls) {
-                    console.log(`AI invoking tool: ${call.name} with args:`, call.args);
                     const tool = toolRegistry[call.name];
-
                     let toolResponseData: Record<string, any>;
+
                     if (tool) {
                         try {
                             toolResponseData = await tool.execute(call.args);
-                            console.log(`Tool ${call.name} returned:`, toolResponseData);
                             if (toolResponseData.status === 'error') {
-                                hasError = true;
-                                lastError = toolResponseData.error;
-                                errorTool = call.name;
+                                toolErrors.push(`${call.name}: ${toolResponseData.error}`);
                             }
                         } catch (err: any) {
-                            console.error(`Tool execution error for ${call.name}:`, err.message);
                             toolResponseData = { status: 'error', error: err.message };
-                            hasError = true;
-                            lastError = err.message;
-                            errorTool = call.name;
+                            toolErrors.push(`${call.name}: ${err.message}`);
                         }
                     } else {
-                        console.error(`Tool ${call.name} not found in registry.`);
                         toolResponseData = { status: 'error', error: "Tool not found." };
-                        hasError = true;
-                        lastError = "Tool not found.";
-                        errorTool = call.name;
+                        toolErrors.push(`${call.name}: Not found`);
                     }
 
                     functionResponses.push({
@@ -132,14 +122,13 @@ export async function analyzeIntent(text: string): Promise<string> {
                     });
                 }
 
-                if (hasError) {
+                if (toolErrors.length > 0) {
                     functionResponses.push({
-                        text: `The tool ${errorTool} failed with error: ${lastError}. You MUST report this failure to the user. DO NOT claim success.`
+                        text: `The following tools failed: ${toolErrors.join(", ")}. You MUST report these failures to the user. DO NOT claim success.`
                     });
                 }
 
                 result = await chat.sendMessage(functionResponses);
-                calls = result.response.functionCalls();
                 loopCount++;
             }
 
