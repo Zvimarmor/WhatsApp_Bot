@@ -23,6 +23,7 @@ async function getAuthClient() {
     });
 }
 
+// Strictly targets the 'Expenses' worksheet tab. Creates it if missing.
 async function getOrInitializeExpenseSheet(): Promise<{ id: string, tab: string }> {
     if (cachedSheetId && resolvedExpensesTabName) return { id: cachedSheetId, tab: resolvedExpensesTabName };
 
@@ -45,30 +46,32 @@ async function getOrInitializeExpenseSheet(): Promise<{ id: string, tab: string 
     const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
     const sheets_list = spreadsheet.data.sheets || [];
 
-    // 1. Try to find a sheet named 'Expenses'
+    // Find 'Expenses' tab
     let targetTab = sheets_list.find(s => s.properties?.title === EXPENSES_TAB);
 
-    // 2. Fallback to the first sheet if not found
-    if (!targetTab && sheets_list.length > 0) {
-        targetTab = sheets_list[0];
-        console.log(`[Expenses] '${EXPENSES_TAB}' tab not found, falling back to first sheet: '${targetTab.properties?.title}'`);
+    if (!targetTab) {
+        console.log(`[Expenses] '${EXPENSES_TAB}' tab not found. Creating it immediately...`);
+        await sheets.spreadsheets.batchUpdate({
+            spreadsheetId: sheetId,
+            requestBody: {
+                requests: [{ addSheet: { properties: { title: EXPENSES_TAB } } }]
+            }
+        });
+        resolvedExpensesTabName = EXPENSES_TAB;
+    } else {
+        resolvedExpensesTabName = targetTab.properties?.title || EXPENSES_TAB;
     }
 
-    if (!targetTab || !targetTab.properties?.title) {
-        throw new Error("Sheet Expenses not found. Please ensure the tabs are named correctly.");
-    }
+    console.log(`[Expenses] Target tab active: '${resolvedExpensesTabName}'`);
 
-    resolvedExpensesTabName = targetTab.properties.title;
-    console.log(`[Expenses] Using tab: '${resolvedExpensesTabName}'`);
-
-    // 3. Initialize headers ONLY if sheet is completely empty
+    // Initialize headers ONLY if completely empty
     const checkRes = await sheets.spreadsheets.values.get({
         spreadsheetId: sheetId,
-        range: `'${resolvedExpensesTabName}'!A1:Z100`, // Check wide range
+        range: `'${resolvedExpensesTabName}'!A1:Z100`,
     });
 
     if (!checkRes.data.values || checkRes.data.values.length === 0) {
-        console.log(`[Expenses] Sheet is empty. Initializing headers in '${resolvedExpensesTabName}'...`);
+        console.log(`[Expenses] Tab is empty. Initializing headers in '${resolvedExpensesTabName}'...`);
         await sheets.spreadsheets.values.update({
             spreadsheetId: sheetId,
             range: `'${resolvedExpensesTabName}'!A1:D1`,
@@ -85,13 +88,13 @@ async function getOrInitializeExpenseSheet(): Promise<{ id: string, tab: string 
 export const expenseTools = {
     add_expense: {
         name: "add_expense",
-        description: "Log an expense. Use when the user reports spending money.",
+        description: "Append a new expense record to the 'Expenses' worksheet tab inside the 'astra_bot_expenses' Google Sheet.",
         parameters: {
             type: "object",
             properties: {
                 amount: { type: "number", description: "Amount spent in NIS" },
-                category: { type: "string", description: "Category" },
-                description: { type: "string", description: "Description" }
+                category: { type: "string", description: "Category (food, transport, shopping, etc)" },
+                description: { type: "string", description: "Short description" }
             },
             required: ["amount", "category", "description"]
         },
@@ -114,16 +117,15 @@ export const expenseTools = {
                     }
                 });
 
-                return { status: "success", message: `נרשמה הוצאה: ${args.amount} ₪ - ${args.description}` };
+                return { status: "success", message: `הוצאה ע"ס ${args.amount} ₪ נרשמה בגיליון.` };
             } catch (err: any) {
-                console.error('[Expenses] Error:', err.message);
                 return { status: "error", error: err.message };
             }
         }
     },
     get_expense_summary: {
         name: "get_expense_summary",
-        description: "Get summary of recent expenses.",
+        description: "Summary of recent expenses.",
         parameters: {
             type: "object",
             properties: {

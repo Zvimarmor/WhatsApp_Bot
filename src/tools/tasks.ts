@@ -14,7 +14,7 @@ let resolvedTasksTabName: string | null = null;
 
 function getAuthClient() {
     if (!fs.existsSync(KEY_PATH)) {
-        throw new Error("Missing 'service_account.json'.");
+        throw new Error("Missing 'service_account.json'. Check if service_account.json is in the project root.");
     }
     return new google.auth.GoogleAuth({
         keyFile: KEY_PATH,
@@ -22,6 +22,7 @@ function getAuthClient() {
     });
 }
 
+// Strictly targets the 'Tasks' worksheet tab. Creates it if missing.
 async function getSheetInfo(): Promise<{ id: string, tab: string }> {
     if (cachedSheetId && resolvedTasksTabName) return { id: cachedSheetId, tab: resolvedTasksTabName };
 
@@ -35,7 +36,7 @@ async function getSheetInfo(): Promise<{ id: string, tab: string }> {
 
     const files = res.data.files;
     if (!files || files.length === 0 || !files[0].id) {
-        throw new Error("Spreadsheet 'astra_bot_expenses' not found.");
+        throw new Error("Spreadsheet 'astra_bot_expenses' not found. Ensure it is shared with the service account email.");
     }
     const sheetId = files[0].id;
     cachedSheetId = sheetId;
@@ -44,30 +45,32 @@ async function getSheetInfo(): Promise<{ id: string, tab: string }> {
     const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
     const sheets_list = spreadsheet.data.sheets || [];
 
-    // 1. Look for 'Tasks'
+    // Find 'Tasks' tab
     let targetTab = sheets_list.find(s => s.properties?.title === TASKS_TAB);
 
-    // 2. Fallback to index 0
-    if (!targetTab && sheets_list.length > 0) {
-        targetTab = sheets_list[0];
-        console.log(`[Tasks] '${TASKS_TAB}' tab not found, falling back to index 0: '${targetTab.properties?.title}'`);
+    if (!targetTab) {
+        console.log(`[Tasks] '${TASKS_TAB}' tab not found. Creating it immediately...`);
+        await sheets.spreadsheets.batchUpdate({
+            spreadsheetId: sheetId,
+            requestBody: {
+                requests: [{ addSheet: { properties: { title: TASKS_TAB } } }]
+            }
+        });
+        resolvedTasksTabName = TASKS_TAB;
+    } else {
+        resolvedTasksTabName = targetTab.properties?.title || TASKS_TAB;
     }
 
-    if (!targetTab || !targetTab.properties?.title) {
-        throw new Error("Sheet Tasks not found. Please ensure the tabs are named correctly.");
-    }
+    console.log(`[Tasks] Target tab active: '${resolvedTasksTabName}'`);
 
-    resolvedTasksTabName = targetTab.properties.title;
-    console.log(`[Tasks] Using tab: '${resolvedTasksTabName}'`);
-
-    // 3. Initialize headers ONLY if completely empty
+    // Initialize headers ONLY if completely empty
     const checkRes = await sheets.spreadsheets.values.get({
         spreadsheetId: sheetId,
         range: `'${resolvedTasksTabName}'!A1:Z100`,
     });
 
     if (!checkRes.data.values || checkRes.data.values.length === 0) {
-        console.log(`[Tasks] Sheet is empty. Initializing headers in '${resolvedTasksTabName}'...`);
+        console.log(`[Tasks] Tab is empty. Initializing headers in '${resolvedTasksTabName}'...`);
         await sheets.spreadsheets.values.update({
             spreadsheetId: sheetId,
             range: `'${resolvedTasksTabName}'!A1:E1`,
@@ -76,7 +79,7 @@ async function getSheetInfo(): Promise<{ id: string, tab: string }> {
         });
     }
 
-    return { id: sheetId, tab: resolvedTasksTabName };
+    return { id: sheetId, tab: resolvedTasksTabName! };
 }
 
 async function getNextTaskId(sheets: any, sheetId: string, tabName: string): Promise<string> {
@@ -98,12 +101,12 @@ async function getNextTaskId(sheets: any, sheetId: string, tabName: string): Pro
 export const taskTools = {
     add_task_to_sheet: {
         name: "add_task_to_sheet",
-        description: "Add task to Google Sheets.",
+        description: "Add a new task record to the 'Tasks' worksheet tab inside the 'astra_bot_expenses' Google Sheet. Use this for ALL task management.",
         parameters: {
             type: "object",
             properties: {
                 title: { type: "string" },
-                priority: { type: "string" }
+                priority: { type: "string", description: "high, medium, or low" }
             },
             required: ["title"]
         },
@@ -125,7 +128,7 @@ export const taskTools = {
                         values: [[taskId, date, args.title, 'Pending', priority]]
                     }
                 });
-                return { status: "success", taskId, message: `משימה ${taskId} נוספה.` };
+                return { status: "success", taskId, message: `משימה ${taskId} נוספה לגיליון.` };
             } catch (err: any) {
                 return { status: "error", error: err.message };
             }
@@ -133,7 +136,7 @@ export const taskTools = {
     },
     list_tasks_from_sheet: {
         name: "list_tasks_from_sheet",
-        description: "List tasks.",
+        description: "Read all pending task records from the 'Tasks' worksheet tab inside the 'astra_bot_expenses' Google Sheet.",
         parameters: { type: "object", properties: {} },
         execute: async (args: any) => {
             try {
@@ -154,8 +157,8 @@ export const taskTools = {
     },
     complete_task_in_sheet: {
         name: "complete_task_in_sheet",
-        description: "Complete task.",
-        parameters: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] },
+        description: "Update a task record status to 'Completed' in the 'Tasks' worksheet tab inside the 'astra_bot_expenses' Google Sheet.",
+        parameters: { type: "object", properties: { taskId: { type: "string", description: "The T-ID (e.g. T1) or part of the title" } }, required: ["taskId"] },
         execute: async (args: any) => {
             try {
                 const { id, tab } = await getSheetInfo();
@@ -165,9 +168,9 @@ export const taskTools = {
                 const rows = res.data.values || [];
                 const search = (args.taskId || '').toLowerCase();
                 const idx = rows.findIndex((r, i) => i > 0 && (r[0].toLowerCase() === search || r[2].toLowerCase().includes(search)) && (r[3] || '').toLowerCase() === 'pending');
-                if (idx === -1) return { status: "error", error: "משימה לא נמצאה" };
+                if (idx === -1) return { status: "error", error: "משימה לא נמצאה או שכבר הושלמה" };
                 await sheets.spreadsheets.values.update({ spreadsheetId: id, range: `'${tab}'!D${idx + 1}`, valueInputOption: 'USER_ENTERED', requestBody: { values: [['Completed']] } });
-                return { status: "success", message: "המשימה הושלמה" };
+                return { status: "success", message: "המשימה סומנה כהושלמה בגיליון" };
             } catch (err: any) {
                 return { status: "error", error: err.message };
             }
@@ -175,7 +178,7 @@ export const taskTools = {
     },
     delete_task: {
         name: "delete_task",
-        description: "Delete task.",
+        description: "Permanently delete a task row from the 'Tasks' worksheet tab inside the 'astra_bot_expenses' Google Sheet.",
         parameters: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] },
         execute: async (args: any) => {
             try {
@@ -190,7 +193,7 @@ export const taskTools = {
                 const idx = rows.findIndex((r, i) => i > 0 && (r[0].toLowerCase() === search || r[2].toLowerCase().includes(search)));
                 if (idx === -1) return { status: "error", error: "משימה לא נמצאה" };
                 await sheets.spreadsheets.batchUpdate({ spreadsheetId: id, requestBody: { requests: [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: idx, endIndex: idx + 1 } } }] } });
-                return { status: "success", message: "המשימה נמחקה" };
+                return { status: "success", message: "המשימה נמחקה מהגיליון" };
             } catch (err: any) {
                 return { status: "error", error: err.message };
             }
