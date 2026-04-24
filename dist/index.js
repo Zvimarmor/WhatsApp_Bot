@@ -95,12 +95,14 @@ async function connectToWhatsApp() {
             return;
         }
         // 2. AUTHORIZATION
+        const cleanRemote = remoteJid.replace(/\D/g, '');
+        const cleanOwner = config_1.config.ownerPhoneNumber.replace(/\D/g, '');
         const isSelfChat = remoteJid.includes(botId);
-        const isOwner = config_1.config.ownerPhoneNumber && remoteJid.replace(/\D/g, '').includes(config_1.config.ownerPhoneNumber);
+        // Match last 9 digits to handle 05x vs 9725x
+        const isOwner = cleanOwner && cleanRemote.endsWith(cleanOwner.slice(-9));
         if (!isSelfChat && !isOwner) {
-            // Log once for unauthorized to ensure we aren't ignoring the owner
             if (m.type === 'notify') {
-                console.log(`[Auth] Ignored message from ${remoteJid} (Not owner or self). Jid numbers: ${remoteJid.replace(/\D/g, '')}, Owner: ${config_1.config.ownerPhoneNumber}`);
+                console.log(`[Auth] Ignored message from ${remoteJid}. Remote cleaned: ${cleanRemote}, Owner cleaned: ${cleanOwner}`);
             }
             return;
         }
