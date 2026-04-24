@@ -90,39 +90,46 @@ async function connectToWhatsApp() {
         const botId = sock.user?.id.split(':')[0] || '';
         const remoteJid = msg.key.remoteJid || '';
         const isFromMe = msg.key.fromMe;
-        // 1. HARD BLOCK: Never respond to groups, broadcasts or status
+        // 1. HARD BLOCK
         if (remoteJid.endsWith('@g.us') || remoteJid.endsWith('@broadcast') || remoteJid === 'status@broadcast') {
             return;
         }
-        // 2. AUTHORIZATION: Only self-chat or designated owner
+        // 2. AUTHORIZATION
         const isSelfChat = remoteJid.includes(botId);
-        const isOwner = config_1.config.ownerPhoneNumber && remoteJid.includes(config_1.config.ownerPhoneNumber);
-        if (!isSelfChat && !isOwner)
+        const isOwner = config_1.config.ownerPhoneNumber && remoteJid.replace(/\D/g, '').includes(config_1.config.ownerPhoneNumber);
+        if (!isSelfChat && !isOwner) {
+            // Log once for unauthorized to ensure we aren't ignoring the owner
+            if (m.type === 'notify') {
+                console.log(`[Auth] Ignored message from ${remoteJid} (Not owner or self). Jid numbers: ${remoteJid.replace(/\D/g, '')}, Owner: ${config_1.config.ownerPhoneNumber}`);
+            }
             return;
-        // 3. LOOP PREVENTION: Don't respond to our own messages in owner chat
-        // (But allow them in self-chat if they aren't the exact last response to avoid loops)
-        if (isFromMe && remoteJid !== botId && !remoteJid.includes(botId))
+        }
+        // 3. LOOP PREVENTION
+        if (isFromMe && !isSelfChat)
             return;
         console.log(`[Auth] Processing message from: ${remoteJid} (Self: ${isSelfChat}, Owner: ${isOwner})`);
-        // Cache self-chat JID
+        const memBefore = process.memoryUsage();
+        console.log(`[Memory] Pre-processing: RSS=${Math.round(memBefore.rss / 1024 / 1024)}MB`);
         (0, scheduler_1.setSelfChatJid)(remoteJid);
         try {
             // === Handle Voice Messages ===
             if (msg.message.audioMessage) {
-                console.log('Processing voice message...');
+                console.log('[Voice] Downloading audio...');
                 const buffer = await (0, baileys_1.downloadMediaMessage)(msg, 'buffer', {});
                 const mimeType = msg.message.audioMessage.mimetype || 'audio/ogg; codecs=opus';
+                console.log(`[Voice] Analyzing ${buffer.length} bytes...`);
                 const responseText = await (0, ai_1.analyzeAudio)(buffer, mimeType);
                 lastResponseText = responseText;
                 await sock.sendMessage(remoteJid, { text: responseText });
                 return;
             }
-            // === Handle Image Messages (Receipt OCR) ===
+            // === Handle Image Messages ===
             if (msg.message.imageMessage) {
-                console.log('Processing image message...');
+                console.log('[Image] Downloading image...');
                 const buffer = await (0, baileys_1.downloadMediaMessage)(msg, 'buffer', {});
                 const mimeType = msg.message.imageMessage.mimetype || 'image/jpeg';
                 const caption = msg.message.imageMessage.caption || '';
+                console.log(`[Image] Analyzing with caption height: ${caption.length}...`);
                 const prompt = caption
                     ? `המשתמש שלח תמונה עם הכיתוב: "${caption}". נתח את התמונה ועזור לו.`
                     : 'חלץ מהקבלה את הסכום הכולל, בית העסק והקטגוריה, והשתמש בכלי add_expense כדי לשמור אותם.';
@@ -133,11 +140,15 @@ async function connectToWhatsApp() {
             }
             // === Handle Text Messages ===
             const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
-            if (!text)
+            if (!text) {
+                console.log('[Text] No content found in message. Skipping.');
                 return;
-            if (msg.key.fromMe && text === lastResponseText)
+            }
+            if (msg.key.fromMe && text === lastResponseText) {
+                console.log('[Loop] Detected own response. Skipping.');
                 return;
-            console.log('Processing text message...');
+            }
+            console.log(`[Text] Analyzing intent: "${text.substring(0, 30)}..."`);
             const responseText = await (0, ai_1.analyzeIntent)(text);
             lastResponseText = responseText;
             // Check if user wants a voice reply
@@ -149,19 +160,27 @@ async function connectToWhatsApp() {
                     await sock.sendMessage(remoteJid, {
                         audio: audioBuffer,
                         mimetype: 'audio/ogg; codecs=opus',
-                        ptt: true // Send as voice note (push-to-talk)
+                        ptt: true
                     });
                     return;
                 }
                 catch (ttsErr) {
-                    console.error('[TTS] Failed, falling back to text:', ttsErr.message);
+                    console.error('[TTS] Failed:', ttsErr.message);
                 }
             }
+            console.log(`[Response] Sending message (${responseText.length} chars)`);
             await sock.sendMessage(remoteJid, { text: responseText });
+            const memAfter = process.memoryUsage();
+            console.log(`[Memory] Post-processing: RSS=${Math.round(memAfter.rss / 1024 / 1024)}MB`);
         }
         catch (err) {
-            console.error('Error processing message:', err.message);
-            await sock.sendMessage(remoteJid, { text: "מצטערת, קרתה תקלה קטנה. נסה שוב." });
+            console.error('[Error] Processing failed:', err.stack || err.message);
+            try {
+                await sock.sendMessage(remoteJid, { text: "⚠️ קרתה תקלה קטנה בעיבוד ההודעה. נסה שוב." });
+            }
+            catch (sendErr) {
+                console.error('[Error] Could not send failure message:', sendErr);
+            }
         }
     });
 }

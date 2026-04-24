@@ -7,7 +7,7 @@ exports.config = void 0;
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
 exports.config = {
-    ownerPhoneNumber: (process.env.OWNER_PHONE_NUMBER || '').replace(/\D/g, ''),
+    ownerPhoneNumber: (process.env.OWNER_PHONE_NUMBER || process.env.OWNER_NUMBER || '').replace(/\D/g, ''),
     geminiApiKey: process.env.GEMINI_API_KEY || '',
     calendarId: (process.env.CALENDAR_ID || 'primary').trim(),
     expenseSheetId: (process.env.EXPENSE_SHEET_ID || '').trim(),
