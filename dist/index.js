@@ -86,6 +86,13 @@ async function connectToWhatsApp() {
         }
     });
     sock.ev.on('messages.upsert', async (m) => {
+        // ─── RAW DEBUG: log EVERY event before any filtering ───
+        const rawMsg = m.messages[0];
+        const rawKeys = rawMsg?.message ? Object.keys(rawMsg.message).join(', ') : 'NO_MESSAGE';
+        const rawJid = rawMsg?.key?.remoteJid || 'NO_JID';
+        const rawFromMe = rawMsg?.key?.fromMe;
+        console.log(`[RAW] type=${m.type} from=${rawJid} fromMe=${rawFromMe} keys=[${rawKeys}]`);
+        // ─── END RAW DEBUG ───
         if (m.type !== 'notify' && m.type !== 'append')
             return;
         const msg = m.messages[0];

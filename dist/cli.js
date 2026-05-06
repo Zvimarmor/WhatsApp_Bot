@@ -47,6 +47,18 @@ const YELLOW = '\x1b[33m';
 const DIM = '\x1b[2m';
 const RESET = '\x1b[0m';
 const BOLD = '\x1b[1m';
+// RTL support: wrap lines containing Hebrew with directional marks
+const RLE = '\u202B'; // Right-to-Left Embedding
+const PDF = '\u202C'; // Pop Directional Formatting
+const HEBREW_RE = /[\u0590-\u05FF]/;
+function formatRTL(text) {
+    return text.split('\n').map(line => {
+        if (HEBREW_RE.test(line)) {
+            return `${RLE}${line}${PDF}`;
+        }
+        return line;
+    }).join('\n');
+}
 function printBanner() {
     console.log(`
 ${CYAN}╔══════════════════════════════════════════╗
@@ -126,7 +138,9 @@ async function main() {
             const startTime = Date.now();
             const response = await (0, ai_1.analyzeIntent)(input);
             const elapsed = Date.now() - startTime;
-            console.log(`\n${GREEN}${BOLD}Astra ◀${RESET} ${response}`);
+            // Format response with RTL support for Hebrew
+            const formatted = formatRTL(response);
+            console.log(`\n${GREEN}${BOLD}Astra ◀${RESET} ${formatted}`);
             console.log(`${DIM}(${elapsed}ms)${RESET}\n`);
         }
         catch (err) {
