@@ -9,6 +9,10 @@ export function setSelfChatJid(jid: string) {
 }
 
 export function startProactiveScheduler(sock: any) {
+    if (config.cliMode) {
+        console.log('[Scheduler] CLI mode — skipping cron registration.');
+        return;
+    }
     console.log('[Scheduler] Starting cron jobs (Israel time)...');
 
     // 08:00 AM → Morning Briefing

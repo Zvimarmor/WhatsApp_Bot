@@ -13,6 +13,10 @@ function setSelfChatJid(jid) {
     selfChatJid = jid;
 }
 function startProactiveScheduler(sock) {
+    if (config_1.config.cliMode) {
+        console.log('[Scheduler] CLI mode — skipping cron registration.');
+        return;
+    }
     console.log('[Scheduler] Starting cron jobs (Israel time)...');
     // 08:00 AM → Morning Briefing
     node_cron_1.default.schedule('0 8 * * *', async () => {

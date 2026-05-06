@@ -13,7 +13,7 @@ const EXPENSES_TAB = 'Expenses';
 
 let cachedSheetId: string | null = null;
 
-async function getAuthClient() {
+function getAuthClient() {
     if (!fs.existsSync(KEY_PATH)) {
         throw new Error("Missing 'service_account.json'.");
     }

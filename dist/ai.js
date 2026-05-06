@@ -8,8 +8,9 @@ const config_1 = require("./config");
 const registry_1 = require("./tools/registry");
 const memory_1 = require("./memory");
 const genAI = new generative_ai_1.GoogleGenerativeAI(config_1.config.geminiApiKey);
-const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash", // Using Flash for speed and memory efficiency on t2.micro
+// ─── Cached Models (avoid re-instantiation per call) ─────────────────
+const chatModel = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
     systemInstruction: `
 Your name is Astra (אסטרה). You are a personal assistant on WhatsApp.
 
@@ -25,7 +26,7 @@ ABSOLUTE RULES — VIOLATING THESE IS A CRITICAL FAILURE:
 AVAILABLE TOOLS:
 - get_current_time: Current date/time in Israel
 - add_calendar_event / list_calendar_events: Google Calendar
-- write_task_to_google_sheet_tab: EXACTLY what it sounds like. Adds a task to the Sheets DB.
+- write_task_to_google_sheet_tab: Adds a task to the Sheets DB.
 - read_pending_tasks_from_google_sheet: Lists tasks.
 - mark_task_completed_in_google_sheet: Completes a task.
 - delete_task_from_google_sheet: Deletes a task.
@@ -43,11 +44,12 @@ TASK EMOJIS: 📝 Pending, ✅ Done, 🔴 High, 🟡 Medium, 🟢 Low.
         { functionDeclarations: (0, registry_1.getGeminiTools)() },
     ],
 });
-// Exponential backoff with jitter
+// Reuse a single model instance for audio and image (no tools needed)
+const mediaModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+// ─── Retry Helpers ───────────────────────────────────────────────────
 function getRetryDelay(attempt) {
     const base = Math.min(1000 * Math.pow(2, attempt), 16000);
-    const jitter = Math.random() * 1000;
-    return base + jitter;
+    return base + Math.random() * 1000;
 }
 function isRetryableError(error) {
     const msg = error.message || '';
@@ -55,6 +57,8 @@ function isRetryableError(error) {
         msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") ||
         msg.includes("overloaded");
 }
+// ─── Main AI Entry Point ─────────────────────────────────────────────
+let requestCounter = 0;
 async function analyzeIntent(text) {
     if (!config_1.config.geminiApiKey || config_1.config.geminiApiKey === "your_api_key") {
         throw new Error("Gemini API key is not configured.");
@@ -72,46 +76,47 @@ async function analyzeIntent(text) {
             parts: [{ text: row.content }]
         });
     }
-    const chat = model.startChat({ history });
+    const chat = chatModel.startChat({ history });
     (0, memory_1.addMessage)('user', text);
-    console.log(`[AI] Analyzing intent for: "${text.substring(0, 50)}..."`);
+    const reqId = ++requestCounter;
+    console.log(`[AI #${reqId}] Intent: "${text.substring(0, 50)}"`);
     let attempts = 0;
     const maxAttempts = 5;
     while (attempts < maxAttempts) {
         try {
-            console.time('gemini-request');
+            const t0 = Date.now();
             let result = await chat.sendMessage(text);
-            console.timeEnd('gemini-request');
+            console.log(`[AI #${reqId}] Gemini responded in ${Date.now() - t0}ms`);
             let loopCount = 0;
             while (loopCount < 5) {
                 const calls = result.response.functionCalls();
                 if (!calls || calls.length === 0) {
-                    console.log(`[AI] No more tools to call. Finalizing response...`);
+                    console.log(`[AI #${reqId}] Finalizing (no more tools)`);
                     break;
                 }
-                console.log(`[AI] Gemini requested ${calls.length} tools: ${calls.map(c => c.name).join(', ')}`);
+                console.log(`[AI #${reqId}] Tools: ${calls.map(c => c.name).join(', ')}`);
                 const functionResponses = [];
                 const toolErrors = [];
                 for (const call of calls) {
-                    console.log(`[AI] Executing tool: ${call.name}`);
                     const tool = registry_1.toolRegistry[call.name];
                     let toolResponseData;
                     if (tool) {
                         try {
+                            console.log(`[AI #${reqId}] Exec: ${call.name}`);
                             toolResponseData = await tool.execute(call.args);
-                            console.log(`[AI] Tool ${call.name} returned status: ${toolResponseData.status}`);
+                            console.log(`[AI #${reqId}] ${call.name} → ${toolResponseData.status || 'ok'}`);
                             if (toolResponseData.status === 'error') {
                                 toolErrors.push(`${call.name}: ${toolResponseData.error}`);
                             }
                         }
                         catch (err) {
-                            console.error(`[AI] Tool ${call.name} crashed:`, err.message);
+                            console.error(`[AI #${reqId}] ${call.name} crashed:`, err.message);
                             toolResponseData = { status: 'error', error: err.message };
                             toolErrors.push(`${call.name}: ${err.message}`);
                         }
                     }
                     else {
-                        console.warn(`[AI] Tool "${call.name}" not found in registry.`);
+                        console.warn(`[AI #${reqId}] Tool "${call.name}" NOT in registry`);
                         toolResponseData = { status: 'error', error: "Tool not found." };
                         toolErrors.push(`${call.name}: Not found`);
                     }
@@ -123,12 +128,11 @@ async function analyzeIntent(text) {
                     });
                 }
                 if (toolErrors.length > 0) {
-                    console.warn(`[AI] Reporting ${toolErrors.length} tool failures back to Gemini...`);
+                    console.warn(`[AI #${reqId}] ${toolErrors.length} failures`);
                     functionResponses.push({
                         text: `The following tools failed: ${toolErrors.join(", ")}. You MUST report these failures to the user. DO NOT claim success.`
                     });
                 }
-                console.log(`[AI] Sending tool results back to Gemini (Turn ${loopCount + 1})...`);
                 result = await chat.sendMessage(functionResponses);
                 loopCount++;
             }
@@ -138,10 +142,10 @@ async function analyzeIntent(text) {
         }
         catch (error) {
             attempts++;
-            console.error(`[AI] Error (Attempt ${attempts}):`, error.message);
+            console.error(`[AI #${reqId}] Attempt ${attempts} failed:`, error.message);
             if (isRetryableError(error) && attempts < maxAttempts) {
                 const delay = getRetryDelay(attempts);
-                console.warn(`[Retry] Waiting ${Math.round(delay)}ms...`);
+                console.warn(`[AI #${reqId}] Retrying in ${Math.round(delay)}ms...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 continue;
             }
@@ -150,12 +154,12 @@ async function analyzeIntent(text) {
     }
     throw new Error("Failed after maximum retries.");
 }
+// ─── Multimodal: Audio ───────────────────────────────────────────────
 async function analyzeAudio(audioBuffer, mimeType = 'audio/ogg') {
-    const audioModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     let attempts = 0;
     while (attempts < 3) {
         try {
-            const result = await audioModel.generateContent([
+            const result = await mediaModel.generateContent([
                 { text: "תמלל את ההודעה הקולית הזו לעברית וענה עליה בצורה טבעית. אם יש בקשה, בצע אותה." },
                 { inlineData: { mimeType, data: audioBuffer.toString('base64') } }
             ]);
@@ -166,7 +170,7 @@ async function analyzeAudio(audioBuffer, mimeType = 'audio/ogg') {
         }
         catch (error) {
             attempts++;
-            if (isRetryableError(error)) {
+            if (isRetryableError(error) && attempts < 3) {
                 await new Promise(resolve => setTimeout(resolve, getRetryDelay(attempts)));
                 continue;
             }
@@ -175,12 +179,12 @@ async function analyzeAudio(audioBuffer, mimeType = 'audio/ogg') {
     }
     throw new Error("Audio processing failed.");
 }
+// ─── Multimodal: Image ───────────────────────────────────────────────
 async function analyzeImage(imageBuffer, mimeType, userPrompt) {
-    const visionModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     let attempts = 0;
     while (attempts < 3) {
         try {
-            const result = await visionModel.generateContent([
+            const result = await mediaModel.generateContent([
                 { text: userPrompt },
                 { inlineData: { mimeType, data: imageBuffer.toString('base64') } }
             ]);
@@ -188,7 +192,7 @@ async function analyzeImage(imageBuffer, mimeType, userPrompt) {
         }
         catch (error) {
             attempts++;
-            if (isRetryableError(error)) {
+            if (isRetryableError(error) && attempts < 3) {
                 await new Promise(resolve => setTimeout(resolve, getRetryDelay(attempts)));
                 continue;
             }

@@ -16,7 +16,7 @@ const KEY_PATH = path_1.default.join(process.cwd(), 'service_account.json');
 const SPREADSHEET_ID = 'astra_bot_expenses'; // We will search for this by name
 const EXPENSES_TAB = 'Expenses';
 let cachedSheetId = null;
-async function getAuthClient() {
+function getAuthClient() {
     if (!fs_1.default.existsSync(KEY_PATH)) {
         throw new Error("Missing 'service_account.json'.");
     }
