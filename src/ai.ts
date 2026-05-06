@@ -7,7 +7,7 @@ const genAI = new GoogleGenerativeAI(config.geminiApiKey);
 
 // ─── Cached Models (avoid re-instantiation per call) ─────────────────
 const chatModel = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
+    model: "gemini-1.5-flash",
     systemInstruction: `
 Your name is Astra (אסטרה). You are a personal assistant on WhatsApp.
 
@@ -43,7 +43,7 @@ TASK EMOJIS: 📝 Pending, ✅ Done, 🔴 High, 🟡 Medium, 🟢 Low.
 });
 
 // Reuse a single model instance for audio and image (no tools needed)
-const mediaModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const mediaModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 // ─── Retry Helpers ───────────────────────────────────────────────────
 
