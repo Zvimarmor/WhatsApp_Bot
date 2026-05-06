@@ -32,7 +32,7 @@ AVAILABLE TOOLS:
 - delete_task_from_google_sheet: Deletes a task.
 - write_expense_to_google_sheet_tab: Logs an expense.
 - get_expense_summary: Summarize expenses
-- web_search: Search the internet for ANY real-time info (weather, news, etc.)
+- web_search: Search the internet for ANY real-time info (weather, news, facts, etc.)
 - track_habit / log_habit / list_habits: Habit tracking
 - get_daily_status: Daily summary
 
