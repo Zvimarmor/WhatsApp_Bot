@@ -150,9 +150,21 @@ async function connectToWhatsApp() {
                 return;
             }
             // === Text Messages ===
-            const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
+            // Baileys wraps messages in various containers depending on context
+            const msgContent = msg.message.ephemeralMessage?.message // disappearing messages
+                || msg.message.viewOnceMessage?.message // view-once
+                || msg.message.viewOnceMessageV2?.message // view-once v2
+                || msg.message.documentWithCaptionMessage?.message // doc with caption
+                || msg.message.editedMessage?.message?.protocolMessage?.editedMessage // edited
+                || msg.message; // normal
+            const text = msgContent?.conversation
+                || msgContent?.extendedTextMessage?.text
+                || msg.message.conversation
+                || msg.message.extendedTextMessage?.text;
             if (!text) {
-                console.log('[Text] Empty message body. Skipping.');
+                // Debug: show what keys ARE present so we can identify the format
+                const keys = Object.keys(msg.message || {}).join(', ');
+                console.log(`[Text] No text found. Message keys: [${keys}]`);
                 return;
             }
             // Loop guard: don't respond to our own response echo
