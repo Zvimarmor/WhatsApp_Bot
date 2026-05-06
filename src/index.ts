@@ -98,8 +98,10 @@ async function connectToWhatsApp() {
             return;
         }
 
-        // 3. LOOP PREVENTION: ignore our own outgoing messages in non-self chats
-        if (isFromMe && !isSelfChat) return;
+        // 3. LOOP PREVENTION: ignore bot's own outgoing messages in non-self chats
+        // Allow fromMe in self-chat (phone JID) and LID chats (owner's alternate ID)
+        // The echo is caught later by the text === lastResponseText check
+        if (isFromMe && !isSelfChat && !isLid) return;
 
         console.log(`[Msg] From: ${remoteJid} (self=${isSelfChat}, owner=${isOwner}, lid=${isLid})`);
         const memBefore = process.memoryUsage();
