@@ -64,38 +64,41 @@ async function connectToWhatsApp() {
         const remoteJid = msg.key.remoteJid || '';
         const isFromMe = msg.key.fromMe;
 
-        // 1. HARD BLOCK: groups, broadcasts, status, but allow @lid JIDs
+        // 1. HARD BLOCK: groups, broadcasts, status
+        // Allow ONLY if explicitly whitelisted
         if (
             remoteJid.endsWith('@g.us') ||
             remoteJid.endsWith('@broadcast') ||
             remoteJid === 'status@broadcast'
         ) {
-            return;
+            if (!config.whitelistJids.includes(remoteJid)) {
+                return;
+            }
         }
 
-        // 2. AUTHORIZATION
+        // 2. STRICT AUTHORIZATION
         const cleanRemote = remoteJid.replace(/\D/g, '');
         const cleanOwner = config.ownerPhoneNumber.replace(/\D/g, '');
-
-        const isSelfChat = remoteJid.includes(botId);
-        const isLid = remoteJid.endsWith('@lid');
+        const isSelfChat = botId ? remoteJid.includes(botId) : false;
         // Match last 9 digits to handle 05x vs 9725x format mismatch
         const isOwner = cleanOwner.length > 0 && cleanRemote.endsWith(cleanOwner.slice(-9));
+        const isWhitelisted = config.whitelistJids.includes(remoteJid);
 
-        // Allow: self-chat, owner, or LID JIDs from the owner
-        if (!isSelfChat && !isOwner && !isLid) {
+        const isMyOwnJid = isSelfChat || isOwner;
+
+        if (!isMyOwnJid && !isWhitelisted) {
+            // Not a note-to-self, and not a whitelisted chat. Ignore silently.
             if (m.type === 'notify') {
-                console.log(`[Auth] Rejected: ${remoteJid} | remote=${cleanRemote} owner=${cleanOwner}`);
+                console.log(`[Auth] Ignored message (remoteJid=${remoteJid}, isFromMe=${isFromMe})`);
             }
             return;
         }
 
-        // 3. LOOP PREVENTION: ignore bot's own outgoing messages in non-self chats
-        // Allow fromMe in self-chat (phone JID) and LID chats (owner's alternate ID)
-        // The echo is caught later by the text === lastResponseText check
-        if (isFromMe && !isSelfChat && !isLid) return;
+        // 3. LOOP PREVENTION (Bot Echo)
+        // If the bot's own reply is echoed back, the text === lastResponseText check below handles it.
+        // We DO NOT block all `fromMe: true` messages here, because we want the user to trigger the bot from their phone.
 
-        console.log(`[Msg] From: ${remoteJid} (self=${isSelfChat}, owner=${isOwner}, lid=${isLid})`);
+        console.log(`[Msg] From: ${remoteJid} (isMyOwnJid=${isMyOwnJid}, isWhitelisted=${isWhitelisted})`);
         const memBefore = process.memoryUsage();
         console.log(`[Mem] RSS=${Math.round(memBefore.rss / 1024 / 1024)}MB`);
 

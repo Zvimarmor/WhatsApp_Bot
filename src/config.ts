@@ -9,6 +9,7 @@ export const config = {
     expenseSheetId: (process.env.EXPENSE_SHEET_ID || '').trim(),
     port: parseInt(process.env.PORT || '3000', 10),
     cliMode: process.env.CLI_MODE === 'true',
+    whitelistJids: (process.env.WHITELIST_JIDS || '').split(',').map(j => j.trim()).filter(Boolean),
 };
 
 // Boot-time validation (runs once at import)
