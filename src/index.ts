@@ -64,6 +64,8 @@ async function connectToWhatsApp() {
         const remoteJid = msg.key.remoteJid || '';
         const isFromMe = msg.key.fromMe;
 
+        console.log(`[DEBUG WA] upsert: type=${m.type}, remote=${remoteJid}, fromMe=${isFromMe}, botId=${botId}`);
+
         // 1. HARD BLOCK: groups, broadcasts, status
         // Allow ONLY if explicitly whitelisted
         if (
